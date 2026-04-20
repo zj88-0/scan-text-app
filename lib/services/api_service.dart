@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import '../models/saved_text.dart';
 import 'data_service.dart';
 
 /// ApiService handles all HTTP communication with the Node.js backend.
+/// The backend now only does OCR — translation is handled on-device.
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -14,9 +14,9 @@ class ApiService {
 
   String get _baseUrl => _dataService.getServerUrl();
 
-  /// Send an image file to the backend for OCR + translation.
-  /// Returns a [SavedText] with all 4 language translations.
-  Future<SavedText> processImage(File imageFile) async {
+  /// Send an image file to the backend for OCR only.
+  /// Returns the raw extracted text string.
+  Future<String> processImage(File imageFile) async {
     final uri = Uri.parse('$_baseUrl/api/ocr/process');
 
     final request = http.MultipartRequest('POST', uri);
@@ -53,20 +53,8 @@ class ApiService {
       throw ApiException(json['error'] ?? 'Unknown server error');
     }
 
-    final originalText = json['originalText'] as String? ?? '';
-    final rawTranslations = json['translations'] as Map<String, dynamic>? ?? {};
-    final translations = rawTranslations.map(
-      (k, v) => MapEntry(k, v?.toString() ?? originalText),
-    );
-
-    final savedText = SavedText(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      originalText: originalText,
-      translations: Map<String, String>.from(translations),
-      createdAt: DateTime.now(),
-    );
-
-    return savedText;
+    // Only return the original extracted text — translation is done locally
+    return (json['originalText'] as String?) ?? '';
   }
 
   /// Test connectivity to the server.

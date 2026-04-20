@@ -3,7 +3,6 @@ import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/translation_service.dart';
 
-/// Card displayed in the saved texts list.
 class SavedTextCard extends StatelessWidget {
   final SavedText savedText;
   final String langCode;

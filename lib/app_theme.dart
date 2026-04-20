@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 class AppTheme {
   AppTheme._();
 
-  // Palette — warm cream background, deep navy text, amber accent
   static const Color background = Color(0xFFFFF8F0);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color primary = Color(0xFF1A3A5C);      // Deep navy
+  static const Color primary = Color(0xFF1A3A5C);
   static const Color primaryLight = Color(0xFF2E5F8A);
-  static const Color accent = Color(0xFFE8840A);       // Warm amber
+  static const Color accent = Color(0xFFE8840A);
   static const Color accentLight = Color(0xFFF5A940);
   static const Color textDark = Color(0xFF1A1A1A);
   static const Color textMedium = Color(0xFF555555);
@@ -18,7 +17,6 @@ class AppTheme {
   static const Color danger = Color(0xFFCC3333);
   static const Color success = Color(0xFF2D8A4E);
 
-  // Base font sizes — scaled up for elderly readability
   static const double fontXS = 16.0;
   static const double fontSM = 20.0;
   static const double fontMD = 24.0;

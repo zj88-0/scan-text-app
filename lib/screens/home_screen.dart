@@ -5,6 +5,7 @@ import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/api_service.dart';
 import '../services/data_service.dart';
+import '../services/mlkit_translation_service.dart';
 import '../services/translation_service.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/saved_text_card.dart';
@@ -25,9 +26,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final ApiService _apiService = ApiService();
   final DataService _dataService = DataService();
   final AppTranslations _tr = AppTranslations();
+  final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
 
   List<SavedText> _savedTexts = [];
   bool _loading = false;
+  String _loadingStep = '';
   String _currentLang = 'en';
 
   @override
@@ -58,12 +61,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _processImage(File imageFile) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadingStep = _tr.t('processing');
+    });
+
     try {
-      final result = await _apiService.processImage(imageFile);
+      // Step 1: OCR from backend
+      final originalText = await _apiService.processImage(imageFile);
+
+      // Step 2: Translate locally using ML Kit
+      setState(() => _loadingStep = 'Translating...');
+      final translations = await _mlkit.translateToAllConfigured(originalText);
+
       setState(() => _loading = false);
 
       if (!mounted) return;
+
+      // Build a SavedText with the on-device translations (not yet saved)
+      final result = SavedText(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        originalText: originalText,
+        translations: Map<String, String>.from(translations),
+        createdAt: DateTime.now(),
+      );
 
       final saved = await Navigator.push<bool>(
         context,
@@ -150,7 +171,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => const SettingsScreen()),
               );
-              setState(() {});
+              // Refresh language in case it changed
+              setState(() => _currentLang = _dataService.getLanguage());
+              await _loadSavedTexts();
             },
           ),
           const SizedBox(width: 8),
@@ -183,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 28),
           Text(
-            _tr.t('processing'),
+            _loadingStep,
             style: const TextStyle(
               fontSize: AppTheme.fontLG,
               color: AppTheme.primary,
@@ -256,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   );
-                  // Refresh in case language changed
                   setState(() => _currentLang = _dataService.getLanguage());
                 },
                 onDelete: () => _deleteText(text.id),

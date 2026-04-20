@@ -3,7 +3,6 @@ import '../app_theme.dart';
 import '../services/tts_service.dart';
 import '../services/translation_service.dart';
 
-/// A prominent play/stop button for read-aloud functionality.
 class AudioButton extends StatefulWidget {
   final String text;
   final String langCode;

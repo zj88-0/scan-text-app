@@ -3,7 +3,6 @@ import '../app_theme.dart';
 import '../services/data_service.dart';
 import '../services/translation_service.dart';
 
-/// A slider that lets the user adjust text display size.
 class FontSizeSlider extends StatefulWidget {
   final ValueChanged<double> onChanged;
 

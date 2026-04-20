@@ -1,7 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const { extractTextFromImage } = require('../services/groqService');
-const { translateToAllLanguages } = require('../services/translationService');
 
 const router = express.Router();
 
@@ -21,8 +20,9 @@ const upload = multer({
 
 /**
  * POST /api/ocr/process
- * Accepts multipart image upload, extracts text via Groq, translates to all languages.
- * Returns: { success, originalText, translations: { en, zh, ms, ta } }
+ * Accepts multipart image upload, extracts text via Groq.
+ * Translation is handled on-device by the Flutter app.
+ * Returns: { success, originalText }
  */
 router.post('/process', upload.single('image'), async (req, res, next) => {
   try {
@@ -35,18 +35,13 @@ router.post('/process', upload.single('image'), async (req, res, next) => {
 
     console.log(`Processing image: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes)`);
 
-    // Step 1: Extract text using Groq Llama 4 Scout
+    // Extract text using Groq Llama 4 Scout
     const originalText = await extractTextFromImage(base64Image, mimeType);
     console.log(`Extracted text (${originalText.length} chars)`);
-
-    // Step 2: Translate to all 4 languages
-    const translations = await translateToAllLanguages(originalText);
-    console.log('Translation complete');
 
     return res.json({
       success: true,
       originalText,
-      translations,
     });
   } catch (err) {
     next(err);
@@ -56,7 +51,6 @@ router.post('/process', upload.single('image'), async (req, res, next) => {
 /**
  * POST /api/ocr/process-base64
  * Accepts JSON body with { image: "<base64>", mimeType: "image/jpeg" }
- * Useful for Flutter when sending bytes directly.
  */
 router.post('/process-base64', express.json({ limit: '20mb' }), async (req, res, next) => {
   try {
@@ -66,7 +60,6 @@ router.post('/process-base64', express.json({ limit: '20mb' }), async (req, res,
       return res.status(400).json({ success: false, error: 'No image data provided' });
     }
 
-    // Strip data URL prefix if present
     const base64Clean = image.replace(/^data:image\/\w+;base64,/, '');
 
     console.log(`Processing base64 image (${base64Clean.length} chars)`);
@@ -74,13 +67,9 @@ router.post('/process-base64', express.json({ limit: '20mb' }), async (req, res,
     const originalText = await extractTextFromImage(base64Clean, mimeType);
     console.log(`Extracted text (${originalText.length} chars)`);
 
-    const translations = await translateToAllLanguages(originalText);
-    console.log('Translation complete');
-
     return res.json({
       success: true,
       originalText,
-      translations,
     });
   } catch (err) {
     next(err);

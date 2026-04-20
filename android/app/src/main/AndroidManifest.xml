@@ -1,9 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!--  Internet access for server communication  -->
+    <!--   Internet access for server communication and ML Kit model download   -->
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!--  Camera for taking photos  -->
+    <!--   Camera for taking photos   -->
     <uses-permission android:name="android.permission.CAMERA"/>
-    <!--  Storage for accessing gallery images  -->
+    <!--   Storage for accessing gallery images   -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <application

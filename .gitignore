@@ -1,2 +1,12 @@
 .env  
 node_modules 
+# Flutter/Dart temp files
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# OS generated files
+.DS_Store
+Thumbs.db

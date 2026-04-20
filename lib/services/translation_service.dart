@@ -30,7 +30,6 @@ class AppTranslations {
 
   String get currentLang => _currentLang;
 
-  /// Load translations for the given language code. Falls back to English.
   Future<void> load(String langCode) async {
     try {
       final raw = await rootBundle.loadString('assets/translations/$langCode.json');
@@ -38,20 +37,16 @@ class AppTranslations {
       _currentLang = langCode;
       await _dataService.setLanguage(langCode);
     } catch (_) {
-      // fallback to English
       if (langCode != 'en') await load('en');
     }
   }
 
-  /// Load the previously saved language preference.
   Future<void> loadSaved() async {
     final saved = _dataService.getLanguage();
     await load(saved);
   }
 
-  /// Get translated string for the given key.
   String t(String key) => _strings[key] ?? key;
 
-  /// Get TTS locale for current language.
   String get ttsLocale => ttsLocales[_currentLang] ?? 'en-US';
 }
