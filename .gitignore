@@ -6,6 +6,7 @@ node_modules
 .flutter-plugins-dependencies
 .packages
 build/
+lib/firebase_options.dart
 
 # OS generated files
 .DS_Store
