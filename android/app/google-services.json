@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "163684377838",
+    "project_id": "text-scanner-5b122",
+    "storage_bucket": "text-scanner-5b122.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:163684377838:android:aeb25f72f4f1bad4703fff",
+        "android_client_info": {
+          "package_name": "com.example.text_scanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHE3cPN8WbfgIlOifQv90yP0OelfRkHS8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

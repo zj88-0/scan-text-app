@@ -10,7 +10,7 @@ class DataService {
   static const String _serverUrlKey = 'server_url';
   static const String _preferredVoiceNameKey = 'preferred_voice_name';
   static const String _preferredVoiceLocaleKey = 'preferred_voice_locale';
-  static const String _defaultServerUrl = 'http://10.87.204.145:3000';
+  static const String _defaultServerUrl = 'http://10.187.129.145:3000';
 
   static final DataService _instance = DataService._internal();
   factory DataService() => _instance;

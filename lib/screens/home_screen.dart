@@ -1,6 +1,12 @@
-import 'dart:io';
+import 'dart:io'; // covers File and Directory
+// ── [IMAGE SIZE DEBUG] Added dart:typed_data for Uint8List ──────────────────
+import 'dart:typed_data';
+// ────────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+// ── [IMAGE SIZE DEBUG] Added flutter_image_compress import ──────────────────
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+// ────────────────────────────────────────────────────────────────────────────
 import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/api_service.dart';
@@ -60,6 +66,49 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ── [IMAGE SIZE DEBUG] Helper: check size and compress if over 500 KB ──────
+  // To remove: delete this entire method (_getOptimizedImage)
+  Future<({Uint8List bytes, int originalKb, int? compressedKb})>
+  _getOptimizedImage(File file) async {
+    final int originalSize = file.lengthSync();
+    final int originalKb = (originalSize / 1024).round();
+
+    if (originalSize < 500 * 1024) {
+      // Under 500 KB — no compression needed
+      return (
+      bytes: await file.readAsBytes(),
+      originalKb: originalKb,
+      compressedKb: null,
+      );
+    }
+
+    // Over 500 KB — compress
+    final Uint8List? result = await FlutterImageCompress.compressWithFile(
+      file.absolute.path,
+      minWidth: 1024,
+      minHeight: 1024,
+      quality: 75,
+      format: CompressFormat.jpeg,
+    );
+
+    if (result != null) {
+      final int compressedKb = (result.length / 1024).round();
+      return (
+      bytes: result,
+      originalKb: originalKb,
+      compressedKb: compressedKb,
+      );
+    }
+
+    // Fallback if compression fails
+    return (
+    bytes: await file.readAsBytes(),
+    originalKb: originalKb,
+    compressedKb: null,
+    );
+  }
+  // ── [IMAGE SIZE DEBUG END] ──────────────────────────────────────────────────
+
   Future<void> _processImage(File imageFile) async {
     setState(() {
       _loading = true;
@@ -67,8 +116,29 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // ── [IMAGE SIZE DEBUG] Run size check + compression before OCR ──────────
+      // To remove: delete from here...
+      setState(() => _loadingStep = 'Checking image size...');
+      final imageInfo = await _getOptimizedImage(imageFile);
+
+      // Write compressed bytes to a temp file so the API receives the
+      // compressed image when compression was applied, otherwise use original.
+      File fileToSend = imageFile;
+      if (imageInfo.compressedKb != null) {
+        final tempDir = await Directory.systemTemp.createTemp('ocr_compressed_');
+        final tempFile = File('${tempDir.path}/compressed.jpg');
+        await tempFile.writeAsBytes(imageInfo.bytes);
+        fileToSend = tempFile;
+      }
+      // ...to here (and the imageSizeInfo: parameter below)
+      // ── [IMAGE SIZE DEBUG END] ───────────────────────────────────────────────
+
       // Step 1: OCR from backend
-      final originalText = await _apiService.processImage(imageFile);
+      setState(() => _loadingStep = _tr.t('processing'));
+      // ── [IMAGE SIZE DEBUG] Use fileToSend (compressed if applicable) ─────────
+      // To remove: change fileToSend back to imageFile on the next line
+      final originalText = await _apiService.processImage(fileToSend);
+      // ── [IMAGE SIZE DEBUG END] ───────────────────────────────────────────────
 
       // Step 2: Translate locally using ML Kit
       setState(() => _loadingStep = 'Translating...');
@@ -93,6 +163,10 @@ class _HomeScreenState extends State<HomeScreen> {
             savedText: result,
             langCode: _currentLang,
             isNew: true,
+            // ── [IMAGE SIZE DEBUG] Pass size info to ResultScreen ──────────────
+            // To remove: delete this imageSizeInfo: line
+            imageSizeInfo: imageInfo,
+            // ── [IMAGE SIZE DEBUG END] ─────────────────────────────────────────
           ),
         ),
       );

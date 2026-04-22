@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models/saved_text.dart';
@@ -13,11 +14,20 @@ class ResultScreen extends StatefulWidget {
   final String langCode;
   final bool isNew;
 
+  // ── [IMAGE SIZE DEBUG] Added imageSizeInfo optional parameter ───────────────
+  // To remove: delete this one line
+  final ({int originalKb, int? compressedKb, Uint8List bytes})? imageSizeInfo;
+  // ── [IMAGE SIZE DEBUG END] ──────────────────────────────────────────────────
+
   const ResultScreen({
     super.key,
     required this.savedText,
     required this.langCode,
     required this.isNew,
+    // ── [IMAGE SIZE DEBUG] Added imageSizeInfo to constructor ──────────────────
+    // To remove: delete this one line
+    this.imageSizeInfo,
+    // ── [IMAGE SIZE DEBUG END] ─────────────────────────────────────────────────
   });
 
   @override
@@ -211,26 +221,32 @@ class _ResultScreenState extends State<ResultScreen> {
           ),
           const Divider(height: 1),
 
+          // ── [IMAGE SIZE DEBUG] Image size info banner ────────────────────────
+          // To remove: delete from here...
+          if (widget.imageSizeInfo != null) _buildImageSizeBanner(),
+          // ...to here (1 line total, plus the _buildImageSizeBanner method below)
+          // ── [IMAGE SIZE DEBUG END] ────────────────────────────────────────────
+
           // Highlighted text area
           Expanded(
             child: _segments.isEmpty
                 ? Center(
-                    child: Text(
-                      '—',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontMD * _fontSize,
-                        color: AppTheme.textLight,
-                      ),
-                    ),
-                  )
+              child: Text(
+                '—',
+                style: TextStyle(
+                  fontSize: AppTheme.fontMD * _fontSize,
+                  color: AppTheme.textLight,
+                ),
+              ),
+            )
                 : SingleChildScrollView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: _buildHighlightedSegments(),
-                    ),
-                  ),
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _buildHighlightedSegments(),
+              ),
+            ),
           ),
 
           // Bottom controls
@@ -274,6 +290,69 @@ class _ResultScreenState extends State<ResultScreen> {
       ),
     );
   }
+
+  // ── [IMAGE SIZE DEBUG] Banner widget showing original/compressed sizes ───────
+  // To remove: delete this entire method (_buildImageSizeBanner)
+  Widget _buildImageSizeBanner() {
+    final info = widget.imageSizeInfo!;
+    final wasCompressed = info.compressedKb != null;
+
+    return Container(
+      width: double.infinity,
+      color: wasCompressed
+          ? AppTheme.accent.withOpacity(0.10)
+          : AppTheme.success.withOpacity(0.10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            wasCompressed ? Icons.compress_rounded : Icons.check_circle_rounded,
+            size: 20,
+            color: wasCompressed ? AppTheme.accent : AppTheme.success,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textDark,
+                  height: 1.5,
+                ),
+                children: [
+                  TextSpan(
+                    text: '[DEBUG] Image: ',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextSpan(text: 'Original ${info.originalKb} KB'),
+                  if (wasCompressed) ...[
+                    const TextSpan(text: '  →  Compressed '),
+                    TextSpan(
+                      text: '${info.compressedKb} KB',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.accent,
+                      ),
+                    ),
+                    TextSpan(
+                      text:
+                      '  (saved ${info.originalKb - info.compressedKb!} KB)',
+                      style: const TextStyle(color: AppTheme.textMedium),
+                    ),
+                  ] else
+                    const TextSpan(
+                      text: '  — under 500 KB, no compression needed',
+                      style: TextStyle(color: AppTheme.textMedium),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ── [IMAGE SIZE DEBUG END] ────────────────────────────────────────────────────
 
   // ── Segment widgets ───────────────────────────────────────────────────────
 
@@ -321,8 +400,8 @@ class _ResultScreenState extends State<ResultScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: isHighlighted
                     ? Border(
-                        left: BorderSide(color: AppTheme.accent, width: 4),
-                      )
+                  left: BorderSide(color: AppTheme.accent, width: 4),
+                )
                     : null,
               ),
               child: SelectableText(
@@ -334,7 +413,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       : AppTheme.textDark.withOpacity(0.75),
                   height: 1.7,
                   fontWeight:
-                      isHighlighted ? FontWeight.w600 : FontWeight.w400,
+                  isHighlighted ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ),
@@ -363,7 +442,7 @@ class _ResultScreenState extends State<ResultScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 68),
               shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               elevation: _playing ? 6 : 2,
             ),
             icon: Icon(
