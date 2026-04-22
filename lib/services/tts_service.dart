@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'translation_service.dart';
+import 'data_service.dart';
 
 /// TtsService wraps flutter_tts for easy read-aloud of extracted text.
-/// Adds [speakAndWait] which resolves only after the utterance completes,
-/// enabling line-by-line highlighting in ResultScreen.
+/// Supports line-by-line highlighting via [speakAndWait], and per-voice
+/// selection via [speakWithVoice] and [applyPreferredVoice].
 class TtsService {
   static final TtsService _instance = TtsService._internal();
   factory TtsService() => _instance;
@@ -14,7 +15,6 @@ class TtsService {
   bool _isSpeaking = false;
   Completer<void>? _completer;
 
-  // Legacy callbacks (kept for backwards compat)
   Function()? onComplete;
   Function()? onStart;
 
@@ -50,20 +50,58 @@ class TtsService {
       _completer?.complete();
       _completer = null;
     });
+
+    await applyPreferredVoice();
   }
 
-  /// Speak [text] and return immediately (fire-and-forget).
+  /// Apply the user's saved preferred voice.
+  Future<void> applyPreferredVoice() async {
+    final data = DataService();
+    final voiceName = data.getPreferredVoiceName();
+    final voiceLocale = data.getPreferredVoiceLocale();
+    if (voiceName != null && voiceLocale != null) {
+      try {
+        await _tts.setVoice({'name': voiceName, 'locale': voiceLocale});
+      } catch (_) {}
+    }
+  }
+
+  /// Speak [text] (fire-and-forget). Uses preferred voice if set, else
+  /// falls back to locale derived from [langCode].
   Future<void> speak(String text, {String? langCode}) async {
     if (text.isEmpty) return;
-    final locale = langCode != null
-        ? (AppTranslations.ttsLocales[langCode] ?? 'en-US')
-        : AppTranslations().ttsLocale;
-    await _tts.setLanguage(locale);
+
+    final data = DataService();
+    final preferredName = data.getPreferredVoiceName();
+    final preferredLocale = data.getPreferredVoiceLocale();
+
+    if (preferredName != null && preferredLocale != null) {
+      await _tts.setVoice({'name': preferredName, 'locale': preferredLocale});
+    } else {
+      final locale = langCode != null
+          ? (AppTranslations.ttsLocales[langCode] ?? 'en-US')
+          : AppTranslations().ttsLocale;
+      await _tts.setLanguage(locale);
+    }
     await _tts.speak(text);
   }
 
-  /// Speak [text] and wait until it is fully spoken before returning.
-  /// Used by ResultScreen to advance the highlight line by line.
+  /// Preview a specific voice in VoiceSelectionScreen.
+  Future<void> speakWithVoice(
+      String text, String voiceName, String voiceLocale) async {
+    if (text.isEmpty) return;
+    _completer = Completer<void>();
+    try {
+      await _tts.setVoice({'name': voiceName, 'locale': voiceLocale});
+      await _tts.speak(text);
+      await _completer!.future;
+    } catch (_) {
+      _completer?.complete();
+      _completer = null;
+    }
+  }
+
+  /// Speak [text] and wait until it finishes. Used for line-by-line highlight.
   Future<void> speakAndWait(String text, {String? langCode}) async {
     if (text.isEmpty) return;
     _completer = Completer<void>();
@@ -84,5 +122,14 @@ class TtsService {
 
   Future<List<dynamic>> getAvailableLanguages() async {
     return await _tts.getLanguages;
+  }
+
+  /// All voices on the device — list of {'name': ..., 'locale': ...} maps.
+  Future<List<dynamic>> getAvailableVoices() async {
+    try {
+      return await _tts.getVoices;
+    } catch (_) {
+      return [];
+    }
   }
 }

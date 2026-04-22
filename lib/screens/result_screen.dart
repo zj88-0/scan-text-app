@@ -6,6 +6,7 @@ import '../services/translation_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/font_size_slider.dart';
 import '../widgets/language_selector.dart';
+import 'voice_selection_screen.dart';
 
 class ResultScreen extends StatefulWidget {
   final SavedText savedText;
@@ -36,15 +37,10 @@ class _ResultScreenState extends State<ResultScreen> {
   bool _playing = false;
   int _highlightedLine = -1;
 
-  /// Flat list of speakable segments (sentences or short clauses).
-  /// Each entry: { 'text': String, 'origLineIdx': int }
   List<_Segment> _segments = [];
-
   bool _stopRequested = false;
 
   final ScrollController _scrollController = ScrollController();
-
-  /// One GlobalKey per segment for scroll-to-highlight.
   final List<GlobalKey> _segmentKeys = [];
 
   @override
@@ -67,12 +63,6 @@ class _ResultScreenState extends State<ResultScreen> {
 
   String get _displayText => widget.savedText.forLanguage(_currentLang);
 
-  /// Split display text into individual segments for line-by-line reading.
-  ///
-  /// Strategy:
-  ///   1. Split on newlines first to preserve paragraph structure.
-  ///   2. Within each non-empty line, split on sentence-ending punctuation
-  ///      so long lines don't become one giant highlighted block.
   void _buildSegments() {
     _segments = [];
     final allLines = _displayText.split('\n');
@@ -81,8 +71,6 @@ class _ResultScreenState extends State<ResultScreen> {
       final line = allLines[lineIdx].trim();
       if (line.isEmpty) continue;
 
-      // Split on sentence boundaries: . ! ? followed by space or end-of-string.
-      // Keep the punctuation attached to the preceding text.
       final sentencePattern = RegExp(r'(?<=[.!?。！？])\s+');
       final sentences = line.split(sentencePattern);
 
@@ -111,12 +99,9 @@ class _ResultScreenState extends State<ResultScreen> {
 
     for (int i = 0; i < _segments.length; i++) {
       if (_stopRequested) break;
-
       setState(() => _highlightedLine = i);
       _scrollToSegment(i);
-
       await _tts.speakAndWait(_segments[i].text, langCode: _currentLang);
-
       if (_stopRequested) break;
     }
 
@@ -148,7 +133,6 @@ class _ResultScreenState extends State<ResultScreen> {
       ctx,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOut,
-      // Keep highlighted segment in the upper-centre of the viewport.
       alignment: 0.25,
     );
   }
@@ -172,6 +156,20 @@ class _ResultScreenState extends State<ResultScreen> {
       SnackBar(content: Text(_tr.t('saved_success'))),
     );
     Navigator.pop(context, true);
+  }
+
+  // ── Voice selection ───────────────────────────────────────────────────────
+
+  Future<void> _openVoiceSelection() async {
+    await _stopReading();
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const VoiceSelectionScreen()),
+    );
+    // Re-apply voice in case it changed
+    await _tts.applyPreferredVoice();
+    if (mounted) setState(() {});
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -213,29 +211,29 @@ class _ResultScreenState extends State<ResultScreen> {
           ),
           const Divider(height: 1),
 
-          // ── Highlighted text area ─────────────────────────────────────
+          // Highlighted text area
           Expanded(
             child: _segments.isEmpty
                 ? Center(
-              child: Text(
-                '—',
-                style: TextStyle(
-                  fontSize: AppTheme.fontMD * _fontSize,
-                  color: AppTheme.textLight,
-                ),
-              ),
-            )
+                    child: Text(
+                      '—',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontMD * _fontSize,
+                        color: AppTheme.textLight,
+                      ),
+                    ),
+                  )
                 : SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: _buildHighlightedSegments(),
-              ),
-            ),
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _buildHighlightedSegments(),
+                    ),
+                  ),
           ),
 
-          // ── Bottom controls ───────────────────────────────────────────
+          // Bottom controls
           Container(
             decoration: BoxDecoration(
               color: AppTheme.surface,
@@ -251,7 +249,7 @@ class _ResultScreenState extends State<ResultScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildAudioButton(),
+                _buildAudioRow(),
                 const SizedBox(height: 14),
                 if (widget.isNew && !_saved)
                   ElevatedButton.icon(
@@ -283,21 +281,18 @@ class _ResultScreenState extends State<ResultScreen> {
     final widgets = <Widget>[];
     final allLines = _displayText.split('\n');
 
-    // Build a lookup: origLineIdx → list of segment indices belonging to that line.
     final Map<int, List<int>> lineToSegments = {};
     for (int si = 0; si < _segments.length; si++) {
       final origIdx = _segments[si].origLineIdx;
       lineToSegments.putIfAbsent(origIdx, () => []).add(si);
     }
 
-    // Track which original lines we've emitted so we don't double-render.
     final emittedLines = <int>{};
 
     for (int origIdx = 0; origIdx < allLines.length; origIdx++) {
       final rawLine = allLines[origIdx];
 
       if (rawLine.trim().isEmpty) {
-        // Preserve paragraph spacing.
         widgets.add(const SizedBox(height: 16));
         continue;
       }
@@ -306,7 +301,6 @@ class _ResultScreenState extends State<ResultScreen> {
       if (segIndices.isEmpty || emittedLines.contains(origIdx)) continue;
       emittedLines.add(origIdx);
 
-      // Render each sentence/segment within this line individually.
       for (final si in segIndices) {
         final seg = _segments[si];
         final isHighlighted = si == _highlightedLine;
@@ -327,8 +321,8 @@ class _ResultScreenState extends State<ResultScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: isHighlighted
                     ? Border(
-                  left: BorderSide(color: AppTheme.accent, width: 4),
-                )
+                        left: BorderSide(color: AppTheme.accent, width: 4),
+                      )
                     : null,
               ),
               child: SelectableText(
@@ -340,7 +334,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       : AppTheme.textDark.withOpacity(0.75),
                   height: 1.7,
                   fontWeight:
-                  isHighlighted ? FontWeight.w600 : FontWeight.w400,
+                      isHighlighted ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ),
@@ -352,27 +346,82 @@ class _ResultScreenState extends State<ResultScreen> {
     return widgets;
   }
 
-  // ── Audio button ──────────────────────────────────────────────────────────
+  // ── Audio row: Play/Stop button + Voice selector button ───────────────────
 
-  Widget _buildAudioButton() {
-    return ElevatedButton.icon(
-      onPressed: _playing ? _stopReading : _startReading,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: _playing ? AppTheme.danger : AppTheme.accent,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(double.infinity, 68),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: _playing ? 6 : 2,
-      ),
-      icon: Icon(
-        _playing ? Icons.stop_rounded : Icons.volume_up_rounded,
-        size: 32,
-      ),
-      label: Text(
-        _playing ? _tr.t('stop_audio') : _tr.t('play_audio'),
-        style: const TextStyle(
-            fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold),
-      ),
+  Widget _buildAudioRow() {
+    final voiceName = _dataService.getPreferredVoiceName();
+    final hasCustomVoice = voiceName != null;
+
+    return Row(
+      children: [
+        // Main play/stop button — takes most of the width
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: _playing ? _stopReading : _startReading,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _playing ? AppTheme.danger : AppTheme.accent,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 68),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              elevation: _playing ? 6 : 2,
+            ),
+            icon: Icon(
+              _playing ? Icons.stop_rounded : Icons.volume_up_rounded,
+              size: 32,
+            ),
+            label: Text(
+              _playing ? _tr.t('stop_audio') : _tr.t('play_audio'),
+              style: const TextStyle(
+                  fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Voice selection button
+        Tooltip(
+          message: hasCustomVoice ? 'Change voice' : 'Select voice',
+          child: InkWell(
+            onTap: _openVoiceSelection,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: 64,
+              height: 68,
+              decoration: BoxDecoration(
+                color: hasCustomVoice
+                    ? AppTheme.primary.withOpacity(0.10)
+                    : AppTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: hasCustomVoice ? AppTheme.primary : AppTheme.cardBorder,
+                  width: 2,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.record_voice_over_rounded,
+                    color: hasCustomVoice ? AppTheme.primary : AppTheme.textLight,
+                    size: 26,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Voice',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: hasCustomVoice
+                          ? AppTheme.primary
+                          : AppTheme.textLight,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

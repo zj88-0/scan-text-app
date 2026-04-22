@@ -5,6 +5,7 @@ import '../services/data_service.dart';
 import '../services/mlkit_translation_service.dart';
 import '../services/translation_service.dart';
 import '../services/wifi_check_service.dart';
+import 'voice_selection_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -24,13 +25,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _testing = false;
   String? _testResult;
 
-  /// All languages the user has ever added (downloaded or not).
   List<String> _configuredLanguages = [];
-
-  /// The subset that is currently "active" (shown in the language bar).
-  /// Max 4 at a time.
   List<String> _activeLanguages = [];
-
   Map<String, bool> _downloadStatus = {};
   Set<String> _downloading = {};
   Set<String> _deleting = {};
@@ -91,12 +87,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Language model actions ────────────────────────────────────────────────
 
-  /// Toggle whether a language is in the active set (shown in language bar).
   Future<void> _toggleActive(String code) async {
     final isActive = _activeLanguages.contains(code);
 
     if (isActive) {
-      // Deactivate — need at least 1 active
       if (_activeLanguages.length <= 1) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -110,7 +104,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _mlkit.setConfiguredLanguages(newActive);
       setState(() => _activeLanguages = newActive);
     } else {
-      // Activate — enforce max 4
       if (_activeLanguages.length >= _maxActive) {
         _showMaxLanguagesDialog();
         return;
@@ -199,7 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
             style:
-            OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+                OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -236,12 +229,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _addLanguage(String code) async {
     if (_configuredLanguages.contains(code)) return;
 
-    // Wi-Fi check before downloading the new model
     if (!mounted) return;
     final proceed = await _wifiCheck.checkAndConfirm(context);
     if (!proceed) return;
 
-    // Add to configured list; only add to active if under the cap
     final newConfigured = [..._configuredLanguages, code];
     List<String> newActive = List.from(_activeLanguages);
     if (newActive.length < _maxActive) {
@@ -266,10 +257,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return available
         .map((e) => DropdownMenuItem(
-      value: e.key,
-      child: Text(e.value,
-          style: const TextStyle(fontSize: AppTheme.fontXS)),
-    ))
+              value: e.key,
+              child: Text(e.value,
+                  style: const TextStyle(fontSize: AppTheme.fontXS)),
+            ))
         .toList();
   }
 
@@ -290,12 +281,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Translation Languages ────────────────────────────────────
+            // ── Voice Settings ────────────────────────────────────────────
+            _sectionTitle(Icons.record_voice_over_rounded, _tr.t('voice_settings')),
+            const SizedBox(height: 12),
+            _buildVoiceSettingsCard(),
+
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+
+            // ── Translation Languages ─────────────────────────────────────
             _sectionTitle(Icons.translate_rounded, 'Translation Languages'),
             const SizedBox(height: 8),
             Container(
               padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: AppTheme.accent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
@@ -322,12 +322,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            // Active count pill
             Align(
               alignment: Alignment.centerRight,
               child: Container(
                 padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: _activeLanguages.length >= _maxActive
                       ? AppTheme.accent.withOpacity(0.15)
@@ -348,19 +347,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 10),
 
-            // Language cards
             ..._configuredLanguages.map((code) => _buildLanguageCard(code)),
 
             const SizedBox(height: 12),
-
-            // Add language row
             _buildAddLanguageRow(),
 
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Server URL ───────────────────────────────────────────────
+            // ── Server URL ────────────────────────────────────────────────
             _sectionTitle(Icons.dns_rounded, _tr.t('server_url')),
             const SizedBox(height: 12),
             TextField(
@@ -378,14 +374,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _testing ? null : _testConnection,
               icon: _testing
                   ? const SizedBox(
-                width: 22,
-                height: 22,
-                child:
-                CircularProgressIndicator(strokeWidth: 2.5),
-              )
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
                   : const Icon(Icons.wifi_tethering_rounded, size: 26),
-              label:
-              Text(_testing ? 'Testing...' : 'Test Connection'),
+              label: Text(_testing ? 'Testing...' : 'Test Connection'),
             ),
             if (_testResult != null) ...[
               const SizedBox(height: 14),
@@ -444,6 +438,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ── Voice settings card ───────────────────────────────────────────────────
+
+  Widget _buildVoiceSettingsCard() {
+    final voiceName = _dataService.getPreferredVoiceName();
+    final voiceLocale = _dataService.getPreferredVoiceLocale();
+    final hasVoice = voiceName != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withOpacity(0.10),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.record_voice_over_rounded,
+                color: AppTheme.primary, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasVoice ? _friendlyName(voiceName!) : _tr.t('voice_default'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textDark,
+                  ),
+                ),
+                Text(
+                  hasVoice
+                      ? (voiceLocale ?? '')
+                      : _tr.t('voice_default_hint'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontXS,
+                    color: AppTheme.textLight,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const VoiceSelectionScreen()),
+              );
+              setState(() {}); // refresh displayed voice name
+            },
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(80, 44),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
+            child: Text(
+              hasVoice ? _tr.t('voice_change') : _tr.t('voice_select'),
+              style: const TextStyle(
+                  fontSize: AppTheme.fontXS, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _friendlyName(String raw) {
+    return raw
+        .replaceAll('-', ' ')
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
+        .join(' ');
+  }
+
   // ── Widgets ───────────────────────────────────────────────────────────────
 
   Widget _sectionTitle(IconData icon, String title) {
@@ -463,15 +542,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Language card — name/badges on row 1, action buttons on row 2.
-  /// This eliminates overflow when badges + buttons don't fit on one line.
   Widget _buildLanguageCard(String code) {
     final name = _mlkit.displayName(code);
     final isDownloaded = _downloadStatus[code] ?? false;
     final isDownloading = _downloading.contains(code);
     final isDeleting = _deleting.contains(code);
     final isDefault =
-    OnDeviceTranslationService.defaultLanguageCodes.contains(code);
+        OnDeviceTranslationService.defaultLanguageCodes.contains(code);
     final isActive = _activeLanguages.contains(code);
     final atCap = _activeLanguages.length >= _maxActive;
     final everHad = _mlkit.wasEverDownloaded(code);
@@ -493,11 +570,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Row 1: status dot + name + badges ───────────────────────────
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Downloaded status dot
               Container(
                 width: 12,
                 height: 12,
@@ -507,13 +582,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Language name
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Name + badges — wrapped so they never overflow
                     Wrap(
                       spacing: 6,
                       runSpacing: 4,
@@ -538,17 +610,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       isDownloaded
                           ? 'Model ready — on this device'
                           : isDownloading
-                          ? 'Downloading…'
-                          : wasDeletedByUser
-                          ? 'Removed — tap Download to restore'
-                          : 'Not yet downloaded',
+                              ? 'Downloading…'
+                              : wasDeletedByUser
+                                  ? 'Removed — tap Download to restore'
+                                  : 'Not yet downloaded',
                       style: TextStyle(
                         fontSize: AppTheme.fontXS,
                         color: isDownloaded
                             ? AppTheme.success
                             : wasDeletedByUser
-                            ? AppTheme.danger
-                            : AppTheme.textLight,
+                                ? AppTheme.danger
+                                : AppTheme.textLight,
                       ),
                     ),
                   ],
@@ -556,8 +628,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
-
-          // ── Row 2: action buttons (always on their own row) ─────────────
           const SizedBox(height: 12),
           if (isDownloading || isDeleting)
             Center(
@@ -571,7 +641,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           else
             Row(
               children: [
-                // SELECT / DESELECT button — takes available width
                 Expanded(
                   child: GestureDetector(
                     onTap: () => _toggleActive(code),
@@ -582,15 +651,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: isActive
                             ? AppTheme.primary
                             : (!atCap
-                            ? AppTheme.primary.withOpacity(0.08)
-                            : AppTheme.textLight.withOpacity(0.08)),
+                                ? AppTheme.primary.withOpacity(0.08)
+                                : AppTheme.textLight.withOpacity(0.08)),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isActive
                               ? AppTheme.primary
                               : (!atCap
-                              ? AppTheme.primary.withOpacity(0.5)
-                              : AppTheme.textLight),
+                                  ? AppTheme.primary.withOpacity(0.5)
+                                  : AppTheme.textLight),
                           width: 1.5,
                         ),
                       ),
@@ -605,8 +674,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: isActive
                                 ? Colors.white
                                 : (!atCap
-                                ? AppTheme.primary
-                                : AppTheme.textLight),
+                                    ? AppTheme.primary
+                                    : AppTheme.textLight),
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -617,8 +686,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: isActive
                                   ? Colors.white
                                   : (!atCap
-                                  ? AppTheme.primary
-                                  : AppTheme.textLight),
+                                      ? AppTheme.primary
+                                      : AppTheme.textLight),
                             ),
                           ),
                         ],
@@ -627,10 +696,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(width: 10),
-
-                // DOWNLOAD or DELETE button
                 if (!isDownloaded)
-                // Download button
                   Expanded(
                     child: GestureDetector(
                       onTap: () => _downloadModel(code),
@@ -662,7 +728,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   )
                 else
-                // Delete button
                   Expanded(
                     child: GestureDetector(
                       onTap: () => _deleteModel(code),

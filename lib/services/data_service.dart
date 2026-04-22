@@ -8,6 +8,8 @@ class DataService {
   static const String _languageKey = 'app_language';
   static const String _fontSizeKey = 'font_size';
   static const String _serverUrlKey = 'server_url';
+  static const String _preferredVoiceNameKey = 'preferred_voice_name';
+  static const String _preferredVoiceLocaleKey = 'preferred_voice_locale';
   static const String _defaultServerUrl = 'http://10.87.204.145:3000';
 
   static final DataService _instance = DataService._internal();
@@ -91,5 +93,21 @@ class DataService {
   Future<void> setServerUrl(String url) async {
     final clean = url.trimRight().replaceAll(RegExp(r'/+$'), '');
     await _p.setString(_serverUrlKey, clean);
+  }
+
+  // ─── Preferred TTS Voice ─────────────────────────────────────────────────────
+
+  String? getPreferredVoiceName() => _p.getString(_preferredVoiceNameKey);
+
+  String? getPreferredVoiceLocale() => _p.getString(_preferredVoiceLocaleKey);
+
+  Future<void> setPreferredVoice(String name, String locale) async {
+    await _p.setString(_preferredVoiceNameKey, name);
+    await _p.setString(_preferredVoiceLocaleKey, locale);
+  }
+
+  Future<void> clearPreferredVoice() async {
+    await _p.remove(_preferredVoiceNameKey);
+    await _p.remove(_preferredVoiceLocaleKey);
   }
 }

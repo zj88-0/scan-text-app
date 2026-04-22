@@ -33,5 +33,16 @@
   "server_url": "Alamat Pelayan",
   "server_url_hint": "cth. http://192.168.1.100:3000",
   "save_settings": "Simpan Tetapan",
-  "settings_saved": "Tetapan disimpan!"
+  "settings_saved": "Tetapan disimpan!",
+  "voice_settings": "Tetapan Suara",
+  "voice_select": "Pilih",
+  "voice_change": "Tukar",
+  "voice_default": "Suara lalai sistem",
+  "voice_default_hint": "Ketik untuk pilih suara daripada peranti anda",
+  "voice_choose_title": "Pilih Suara",
+  "voice_preview_hint": "Ketik ikon pembesar suara untuk pratonton, kemudian ketik Pilih untuk guna.",
+  "voice_none": "Tiada suara ditemui untuk bahasa ini.\n\nAnda boleh pasang lebih banyak suara dalam tetapan Kebolehcapaian \u2192 Teks-ke-Pertuturan telefon anda.",
+  "voice_set": "Suara ditetapkan kepada",
+  "voice_preview_en": "Helo! Ini adalah pratonton suara yang anda pilih.",
+  "voice_tab_all": "Semua"
 }
