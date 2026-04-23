@@ -10,7 +10,14 @@ class DataService {
   static const String _serverUrlKey = 'server_url';
   static const String _preferredVoiceNameKey = 'preferred_voice_name';
   static const String _preferredVoiceLocaleKey = 'preferred_voice_locale';
-  static const String _defaultServerUrl = 'http://10.187.129.145:3000';
+
+  // ── Paste your Firebase Function trigger URL below ───────────────────────
+  // Find it in Firebase Console → Functions → your function → Trigger URL.
+  // It will look like one of:
+  //   https://api-xxxxxxxx-as.a.run.app               (Cloud Run / Gen 2)
+  //   https://asia-southeast1-PROJECT_ID.cloudfunctions.net/api  (Gen 1)
+  static const String _defaultServerUrl = 'https://api-udefzonqpa-as.a.run.app';
+  // ─────────────────────────────────────────────────────────────────────────
 
   static final DataService _instance = DataService._internal();
   factory DataService() => _instance;
@@ -20,6 +27,15 @@ class DataService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    // Clear any stale localhost / 10.0.x.x / 192.168.x.x URL saved from
+    // development so the app always falls back to the Firebase default.
+    final saved = _prefs!.getString(_serverUrlKey) ?? '';
+    if (saved.contains('localhost') ||
+        saved.contains('127.0.0.1') ||
+        saved.contains('10.0.') ||
+        saved.contains('192.168.')) {
+      await _prefs!.remove(_serverUrlKey);
+    }
   }
 
   SharedPreferences get _p {

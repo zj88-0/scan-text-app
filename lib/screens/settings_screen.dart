@@ -21,7 +21,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final WiFiCheckService _wifiCheck = WiFiCheckService();
 
-  late TextEditingController _urlController;
   bool _testing = false;
   String? _testResult;
 
@@ -36,16 +35,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _urlController = TextEditingController(text: _dataService.getServerUrl());
     _configuredLanguages = List.from(_mlkit.configuredLanguages);
     _activeLanguages = List.from(_mlkit.configuredLanguages);
     _refreshDownloadStatus();
-  }
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
   }
 
   Future<void> _refreshDownloadStatus() async {
@@ -56,22 +48,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _downloadStatus = status);
   }
 
-  // ── Server URL ────────────────────────────────────────────────────────────
-
-  Future<void> _saveServerUrl() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    await _dataService.setServerUrl(url);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_tr.t('settings_saved'))),
-    );
-  }
+  // ── Connection test ───────────────────────────────────────────────────────
 
   Future<void> _testConnection() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    await _dataService.setServerUrl(url);
     setState(() {
       _testing = true;
       _testResult = null;
@@ -81,7 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _testing = false;
       _testResult = ok
           ? '✅  Connected successfully!'
-          : '❌  Cannot connect. Check the URL and server.';
+          : '❌  Cannot connect. Check your internet connection.';
     });
   }
 
@@ -192,7 +171,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
             style:
-                OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+            OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -257,10 +236,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return available
         .map((e) => DropdownMenuItem(
-              value: e.key,
-              child: Text(e.value,
-                  style: const TextStyle(fontSize: AppTheme.fontXS)),
-            ))
+      value: e.key,
+      child: Text(e.value,
+          style: const TextStyle(fontSize: AppTheme.fontXS)),
+    ))
         .toList();
   }
 
@@ -295,7 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             Container(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: AppTheme.accent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
@@ -326,7 +305,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               alignment: Alignment.centerRight,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: _activeLanguages.length >= _maxActive
                       ? AppTheme.accent.withOpacity(0.15)
@@ -356,28 +335,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Server URL ────────────────────────────────────────────────
-            _sectionTitle(Icons.dns_rounded, _tr.t('server_url')),
+            // ── Server Connection ─────────────────────────────────────────
+            _sectionTitle(Icons.cloud_rounded, 'Server Connection'),
             const SizedBox(height: 12),
-            TextField(
-              controller: _urlController,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(fontSize: AppTheme.fontSM),
-              decoration: InputDecoration(
-                hintText: _tr.t('server_url_hint'),
-                prefixIcon: const Icon(Icons.dns_rounded,
-                    color: AppTheme.primary, size: 28),
+
+            // Read-only Firebase URL display
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.cloud_done_rounded,
+                          color: AppTheme.success, size: 22),
+                      SizedBox(width: 10),
+                      Text(
+                        'Firebase Cloud Function',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.success,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _dataService.getServerUrl(),
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontXS,
+                      color: AppTheme.textMedium,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
+
+            // Test connection button
             OutlinedButton.icon(
               onPressed: _testing ? null : _testConnection,
               icon: _testing
                   ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
                   : const Icon(Icons.wifi_tethering_rounded, size: 26),
               label: Text(_testing ? 'Testing...' : 'Test Connection'),
             ),
@@ -407,30 +417,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _saveServerUrl,
-              icon: const Icon(Icons.save_rounded, size: 28),
-              label: Text(_tr.t('save_settings')),
-            ),
-
-            const SizedBox(height: 40),
-            const Divider(),
-            const SizedBox(height: 20),
-
-            _sectionTitle(Icons.info_outline_rounded, 'How to connect'),
-            const SizedBox(height: 12),
-            _infoRow('1.', 'Start the Node.js server on your computer.'),
-            _infoRow('2.',
-                'Make sure your phone and computer are on the same Wi-Fi.'),
-            _infoRow(
-                '3.', 'Find your computer\'s local IP (e.g. 192.168.1.100).'),
-            _infoRow('4.',
-                'Enter: http://192.168.1.100:3000 in the field above.'),
-            _infoRow(
-                '5.', 'For Android emulator use: http://10.0.2.2:3000'),
-            _infoRow(
-                '6.', 'For iOS simulator use: http://localhost:3000'),
             const SizedBox(height: 24),
           ],
         ),
@@ -548,7 +534,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isDownloading = _downloading.contains(code);
     final isDeleting = _deleting.contains(code);
     final isDefault =
-        OnDeviceTranslationService.defaultLanguageCodes.contains(code);
+    OnDeviceTranslationService.defaultLanguageCodes.contains(code);
     final isActive = _activeLanguages.contains(code);
     final atCap = _activeLanguages.length >= _maxActive;
     final everHad = _mlkit.wasEverDownloaded(code);
@@ -610,17 +596,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       isDownloaded
                           ? 'Model ready — on this device'
                           : isDownloading
-                              ? 'Downloading…'
-                              : wasDeletedByUser
-                                  ? 'Removed — tap Download to restore'
-                                  : 'Not yet downloaded',
+                          ? 'Downloading…'
+                          : wasDeletedByUser
+                          ? 'Removed — tap Download to restore'
+                          : 'Not yet downloaded',
                       style: TextStyle(
                         fontSize: AppTheme.fontXS,
                         color: isDownloaded
                             ? AppTheme.success
+                            : isDownloading
+                            ? AppTheme.accent
                             : wasDeletedByUser
-                                ? AppTheme.danger
-                                : AppTheme.textLight,
+                            ? AppTheme.danger
+                            : AppTheme.textLight,
                       ),
                     ),
                   ],
@@ -651,15 +639,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: isActive
                             ? AppTheme.primary
                             : (!atCap
-                                ? AppTheme.primary.withOpacity(0.08)
-                                : AppTheme.textLight.withOpacity(0.08)),
+                            ? AppTheme.primary.withOpacity(0.08)
+                            : AppTheme.textLight.withOpacity(0.08)),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isActive
                               ? AppTheme.primary
                               : (!atCap
-                                  ? AppTheme.primary.withOpacity(0.5)
-                                  : AppTheme.textLight),
+                              ? AppTheme.primary.withOpacity(0.5)
+                              : AppTheme.textLight),
                           width: 1.5,
                         ),
                       ),
@@ -674,8 +662,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: isActive
                                 ? Colors.white
                                 : (!atCap
-                                    ? AppTheme.primary
-                                    : AppTheme.textLight),
+                                ? AppTheme.primary
+                                : AppTheme.textLight),
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -686,8 +674,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: isActive
                                   ? Colors.white
                                   : (!atCap
-                                      ? AppTheme.primary
-                                      : AppTheme.textLight),
+                                  ? AppTheme.primary
+                                  : AppTheme.textLight),
                             ),
                           ),
                         ],
