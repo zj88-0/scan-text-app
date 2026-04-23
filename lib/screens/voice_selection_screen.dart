@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../services/tts_service.dart';
 import '../services/data_service.dart';
+import '../services/mlkit_translation_service.dart';
 import '../services/translation_service.dart';
 
-/// VoiceSelectionScreen — lets the user pick their preferred TTS voice
-/// from the voices installed on the device, filtered by language.
+/// VoiceSelectionScreen — one tab per configured language (reactive to user's
+/// active language list). Each language has its own saved voice. The preview
+/// sentence is translated into that language before being spoken.
 class VoiceSelectionScreen extends StatefulWidget {
   const VoiceSelectionScreen({super.key});
 
@@ -13,31 +15,76 @@ class VoiceSelectionScreen extends StatefulWidget {
   State<VoiceSelectionScreen> createState() => _VoiceSelectionScreenState();
 }
 
-class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
+class _VoiceSelectionScreenState extends State<VoiceSelectionScreen>
+    with SingleTickerProviderStateMixin {
   final TtsService _tts = TtsService();
   final DataService _data = DataService();
   final AppTranslations _tr = AppTranslations();
+  final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
 
+  // The configured languages drive the tabs — reactive, not hardcoded.
+  late List<String> _configuredLangs;
+
+  late TabController _tabController;
+
+  // All device voices, loaded once.
   List<Map<String, String>> _allVoices = [];
-  String? _filterLang;
   bool _loading = true;
+
+  // Which voice is currently being previewed (by name).
   String? _previewingVoice;
 
+  // Cached translated preview sentences keyed by langCode.
+  final Map<String, String> _previewCache = {};
+
+  // The English base sentence that will be translated for each language.
+  static const String _basePreviewEn =
+      'Hello! This is how I sound. I hope you enjoy listening to me.';
+
+  // Locale prefix patterns used to match device voices to language codes.
+  // Extend this map if you add more languages in Settings.
   static const Map<String, List<String>> _langPrefixes = {
     'en': ['en'],
     'zh': ['zh', 'cmn', 'yue'],
     'ms': ['ms', 'id'],
     'ta': ['ta'],
+    'hi': ['hi'],
+    'fr': ['fr'],
+    'de': ['de'],
+    'es': ['es'],
+    'ja': ['ja'],
+    'ko': ['ko'],
+    'ar': ['ar'],
+    'ru': ['ru'],
+    'pt': ['pt'],
+    'it': ['it'],
+    'th': ['th'],
+    'vi': ['vi'],
+    'id': ['id'],
+    'tl': ['tl', 'fil'],
+    'bn': ['bn'],
+    'ur': ['ur'],
   };
-
-  // Tab labels use the language code; friendly name from translations
-  static const List<String?> _tabLangs = ['en', 'zh', 'ms', 'ta', null];
 
   @override
   void initState() {
     super.initState();
+    _configuredLangs = List.from(_mlkit.configuredLanguages);
+    _tabController = TabController(
+      length: _configuredLangs.length,
+      vsync: this,
+    );
     _loadVoices();
   }
+
+  @override
+  void dispose() {
+    _tts.stop();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  // ── Data loading ──────────────────────────────────────────────────────────
 
   Future<void> _loadVoices() async {
     final raw = await _tts.getAvailableVoices();
@@ -52,6 +99,10 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
       }
     }
     voices.sort((a, b) => a['locale']!.compareTo(b['locale']!));
+
+    // Pre-warm translations for all configured languages in parallel.
+    await Future.wait(_configuredLangs.map(_ensurePreview));
+
     if (mounted) {
       setState(() {
         _allVoices = voices;
@@ -60,55 +111,70 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
     }
   }
 
-  List<Map<String, String>> get _filteredVoices {
-    if (_filterLang == null) return _allVoices;
-    final prefixes = _langPrefixes[_filterLang!] ?? [_filterLang!];
+  /// Translate the base English preview sentence into [langCode] and cache it.
+  Future<void> _ensurePreview(String langCode) async {
+    if (_previewCache.containsKey(langCode)) return;
+    if (langCode == 'en') {
+      _previewCache['en'] = _basePreviewEn;
+      return;
+    }
+    try {
+      final translated = await _mlkit.translateSingleTo(_basePreviewEn, langCode);
+      _previewCache[langCode] = translated.isNotEmpty ? translated : _basePreviewEn;
+    } catch (_) {
+      _previewCache[langCode] = _basePreviewEn;
+    }
+  }
+
+  String _previewFor(String langCode) =>
+      _previewCache[langCode] ?? _basePreviewEn;
+
+  // ── Voice filtering ───────────────────────────────────────────────────────
+
+  List<Map<String, String>> _voicesForLang(String langCode) {
+    final prefixes = _langPrefixes[langCode] ?? [langCode];
     return _allVoices.where((v) {
       final locale = v['locale']!.toLowerCase();
       return prefixes.any((p) => locale.startsWith(p));
     }).toList();
   }
 
-  String _langForVoice(Map<String, String> voice) {
-    final locale = voice['locale']!.toLowerCase();
-    for (final entry in _langPrefixes.entries) {
-      if (entry.value.any((p) => locale.startsWith(p))) return entry.key;
-    }
-    return 'other';
-  }
+  // ── Actions ───────────────────────────────────────────────────────────────
 
-  String _previewSentence(Map<String, String> voice) {
-    // Use the translated preview sentence for the voice's language
-    return _tr.t('voice_preview_en');
-  }
-
-  Future<void> _preview(Map<String, String> voice) async {
+  Future<void> _preview(Map<String, String> voice, String langCode) async {
     if (_previewingVoice == voice['name']) {
       await _tts.stop();
       setState(() => _previewingVoice = null);
       return;
     }
+
+    // Ensure the translation is ready (may already be cached).
+    await _ensurePreview(langCode);
+
     setState(() => _previewingVoice = voice['name']);
     await _tts.speakWithVoice(
-      _previewSentence(voice),
+      _previewFor(langCode),
       voice['name']!,
       voice['locale']!,
     );
     if (mounted) setState(() => _previewingVoice = null);
   }
 
-  Future<void> _select(Map<String, String> voice) async {
+  Future<void> _select(Map<String, String> voice, String langCode) async {
     await _tts.stop();
-    await _data.setPreferredVoice(voice['name']!, voice['locale']!);
-    await _tts.applyPreferredVoice();
+    await _data.setVoiceForLang(langCode, voice['name']!, voice['locale']!);
     if (!mounted) return;
+    setState(() {}); // Refresh checkmarks
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_tr.t('voice_set')} ${_friendlyName(voice['name']!)}'),
+        content: Text(
+          '${_friendlyLangName(langCode)}: ${_tr.t('voice_set')} ${_friendlyName(voice['name']!)}',
+        ),
       ),
     );
-    Navigator.pop(context);
   }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   String _friendlyName(String raw) {
     return raw
@@ -119,28 +185,21 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
         .join(' ');
   }
 
-  String _tabLabel(String? lang) {
-    if (lang == null) return _tr.t('voice_tab_all');
-    // Use the existing language name keys from translations
-    switch (lang) {
-      case 'en': return _tr.t('english');
-      case 'zh': return _tr.t('chinese');
-      case 'ms': return _tr.t('malay');
-      case 'ta': return _tr.t('tamil');
-      default: return lang.toUpperCase();
-    }
+  String _friendlyLangName(String langCode) {
+    return OnDeviceTranslationService.allSupportedLanguages[langCode] ??
+        langCode.toUpperCase();
   }
 
-  @override
-  void dispose() {
-    _tts.stop();
-    super.dispose();
+  String _tabLabel(String langCode) {
+    // Use the short UI names from AppTranslations if defined, otherwise full name
+    final uiNames = AppTranslations.languageNames;
+    return uiNames[langCode] ?? _friendlyLangName(langCode);
   }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final savedVoice = _data.getPreferredVoiceName();
-
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -152,33 +211,90 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
             Navigator.pop(context);
           },
         ),
+        bottom: _loading
+            ? null
+            : TabBar(
+          controller: _tabController,
+          isScrollable: _configuredLangs.length > 3,
+          indicatorColor: AppTheme.accent,
+          indicatorWeight: 3,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          labelStyle: const TextStyle(
+            fontSize: AppTheme.fontSM,
+            fontWeight: FontWeight.bold,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: AppTheme.fontSM,
+            fontWeight: FontWeight.normal,
+          ),
+          tabs: _configuredLangs
+              .map((code) => Tab(text: _tabLabel(code)))
+              .toList(),
+        ),
       ),
       body: _loading
           ? _buildLoading()
           : Column(
-              children: [
-                _buildInfoBanner(),
-                _buildLangTabs(),
-                const Divider(height: 1),
-                Expanded(child: _buildVoiceList(savedVoice)),
-              ],
+        children: [
+          _buildInfoBanner(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: _configuredLangs
+                  .map((code) => _buildVoiceListForLang(code))
+                  .toList(),
             ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildLoading() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 4),
-          const SizedBox(height: 20),
-          Text(
-            _tr.t('processing'),
-            style: const TextStyle(
-                fontSize: AppTheme.fontSM, color: AppTheme.textMedium),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.record_voice_over_rounded,
+                size: 44,
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(height: 28),
+            const CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 4),
+            const SizedBox(height: 24),
+            const Text(
+              'Loading available voices…',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Fetching voices from your device\nand preparing translations.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontXS,
+                color: AppTheme.textMedium,
+                height: 1.6,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -207,50 +323,9 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
     );
   }
 
-  Widget _buildLangTabs() {
-    return Container(
-      color: AppTheme.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: _tabLangs.map((lang) {
-            final isSelected = _filterLang == lang;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: () => setState(() => _filterLang = lang),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isSelected ? AppTheme.primary : AppTheme.cardBorder,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Text(
-                    _tabLabel(lang),
-                    style: TextStyle(
-                      fontSize: AppTheme.fontXS,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? Colors.white : AppTheme.textMedium,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVoiceList(String? savedVoice) {
-    final voices = _filteredVoices;
+  Widget _buildVoiceListForLang(String langCode) {
+    final voices = _voicesForLang(langCode);
+    final savedVoice = _data.getVoiceNameForLang(langCode);
 
     if (voices.isEmpty) {
       return Center(
@@ -281,7 +356,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: voices.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, indent: 20, endIndent: 20),
+      const Divider(height: 1, indent: 20, endIndent: 20),
       itemBuilder: (ctx, i) {
         final voice = voices[i];
         final name = voice['name']!;
@@ -295,7 +370,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
               : Colors.transparent,
           child: ListTile(
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             leading: Container(
               width: 44,
               height: 44,
@@ -342,11 +417,11 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                   tooltip: isPreviewing
                       ? _tr.t('stop_audio')
                       : _tr.t('play_audio'),
-                  onPressed: () => _preview(voice),
+                  onPressed: () => _preview(voice, langCode),
                 ),
                 const SizedBox(width: 4),
                 TextButton(
-                  onPressed: isSelected ? null : () => _select(voice),
+                  onPressed: isSelected ? null : () => _select(voice, langCode),
                   style: TextButton.styleFrom(
                     backgroundColor: isSelected
                         ? AppTheme.success.withOpacity(0.12)
@@ -363,7 +438,8 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                     style: TextStyle(
                       fontSize: AppTheme.fontXS,
                       fontWeight: FontWeight.bold,
-                      color: isSelected ? AppTheme.success : AppTheme.primary,
+                      color:
+                      isSelected ? AppTheme.success : AppTheme.primary,
                     ),
                   ),
                 ),

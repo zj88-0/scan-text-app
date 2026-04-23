@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/data_service.dart';
+import '../services/groq_translation_service.dart';
+import '../services/mlkit_translation_service.dart';
+import '../services/premium_service.dart';
 import '../services/translation_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/font_size_slider.dart';
@@ -14,20 +17,15 @@ class ResultScreen extends StatefulWidget {
   final String langCode;
   final bool isNew;
 
-  // ── [IMAGE SIZE DEBUG] Added imageSizeInfo optional parameter ───────────────
-  // To remove: delete this one line
+  // kept for API compatibility — no longer displayed
   final ({int originalKb, int? compressedKb, Uint8List bytes})? imageSizeInfo;
-  // ── [IMAGE SIZE DEBUG END] ──────────────────────────────────────────────────
 
   const ResultScreen({
     super.key,
     required this.savedText,
     required this.langCode,
     required this.isNew,
-    // ── [IMAGE SIZE DEBUG] Added imageSizeInfo to constructor ──────────────────
-    // To remove: delete this one line
     this.imageSizeInfo,
-    // ── [IMAGE SIZE DEBUG END] ─────────────────────────────────────────────────
   });
 
   @override
@@ -38,10 +36,17 @@ class _ResultScreenState extends State<ResultScreen> {
   final DataService _dataService = DataService();
   final AppTranslations _tr = AppTranslations();
   final TtsService _tts = TtsService();
+  final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
+  final GroqTranslationService _groqTranslation = GroqTranslationService();
+  final PremiumService _premium = PremiumService();
 
   late String _currentLang;
   late double _fontSize;
   bool _saved = false;
+  bool _translating = false;
+
+  // Controls whether the bottom action panel is expanded or collapsed
+  bool _panelExpanded = true;
 
   // ── TTS highlighting state ────────────────────────────────────────────────
   bool _playing = false;
@@ -60,6 +65,10 @@ class _ResultScreenState extends State<ResultScreen> {
     _fontSize = _dataService.getFontSize();
     _saved = !widget.isNew;
     _buildSegments();
+
+    if (_premium.isPremium && widget.isNew && _currentLang != 'en') {
+      _ensurePremiumTranslation(_currentLang);
+    }
   }
 
   @override
@@ -135,8 +144,19 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   void _scrollToSegment(int index) {
-    if (index < 0 || index >= _segmentKeys.length) return;
-    final key = _segmentKeys[index];
+    if (index < 0 || index >= _segments.length) return;
+
+    final targetLineIdx = _segments[index].origLineIdx;
+    int anchorSi = index;
+    for (int i = 0; i < _segments.length; i++) {
+      if (_segments[i].origLineIdx == targetLineIdx) {
+        anchorSi = i;
+        break;
+      }
+    }
+
+    if (anchorSi >= _segmentKeys.length) return;
+    final key = _segmentKeys[anchorSi];
     final ctx = key.currentContext;
     if (ctx == null) return;
     Scrollable.ensureVisible(
@@ -147,13 +167,69 @@ class _ResultScreenState extends State<ResultScreen> {
     );
   }
 
+  // ── Language switching ────────────────────────────────────────────────────
+
   Future<void> _changeLanguage(String langCode) async {
     await _stopReading();
     await _tr.load(langCode);
+
+    final existing = widget.savedText.translations[langCode];
+    final needsTranslation = existing == null || existing.isEmpty;
+
+    if (needsTranslation) {
+      setState(() => _translating = true);
+      try {
+        if (_premium.isPremium) {
+          await _ensurePremiumTranslation(langCode);
+        } else {
+          final translated = await _mlkit.translateSingleTo(
+            widget.savedText.originalText,
+            langCode,
+          );
+          if (translated.isNotEmpty) {
+            widget.savedText.translations[langCode] = translated;
+            if (_saved) {
+              await _dataService.updateText(widget.savedText);
+            }
+          }
+        }
+      } catch (_) {
+        // Silently fall back
+      } finally {
+        if (mounted) setState(() => _translating = false);
+      }
+    }
+
     setState(() {
       _currentLang = langCode;
       _buildSegments();
     });
+  }
+
+  Future<void> _ensurePremiumTranslation(String langCode) async {
+    if (langCode == 'en') return;
+    final existing = widget.savedText.translations[langCode];
+    if (existing != null && existing.isNotEmpty) return;
+
+    if (!mounted) return;
+    setState(() => _translating = true);
+
+    try {
+      final translated = await _groqTranslation.translateSmart(
+        widget.savedText.originalText,
+        langCode,
+      );
+      if (translated.isNotEmpty) {
+        widget.savedText.translations[langCode] = translated;
+        if (_saved) {
+          await _dataService.updateText(widget.savedText);
+        }
+      }
+    } catch (_) {
+      // Silently fall back
+    } finally {
+      if (mounted) setState(() => _translating = false);
+    }
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -177,7 +253,6 @@ class _ResultScreenState extends State<ResultScreen> {
       context,
       MaterialPageRoute(builder: (_) => const VoiceSelectionScreen()),
     );
-    // Re-apply voice in case it changed
     await _tts.applyPreferredVoice();
     if (mounted) setState(() {});
   }
@@ -211,148 +286,141 @@ class _ResultScreenState extends State<ResultScreen> {
       ),
       body: Column(
         children: [
-          // Font size slider
+          // ── Font size slider always at top ────────────────────────────────
           Container(
             color: AppTheme.surface,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: FontSizeSlider(
               onChanged: (v) => setState(() => _fontSize = v),
             ),
           ),
           const Divider(height: 1),
 
-          // ── [IMAGE SIZE DEBUG] Image size info banner ────────────────────────
-          // To remove: delete from here...
-          if (widget.imageSizeInfo != null) _buildImageSizeBanner(),
-          // ...to here (1 line total, plus the _buildImageSizeBanner method below)
-          // ── [IMAGE SIZE DEBUG END] ────────────────────────────────────────────
-
-          // Highlighted text area
+          // ── Main scrollable text area ─────────────────────────────────────
           Expanded(
-            child: _segments.isEmpty
-                ? Center(
-              child: Text(
-                '—',
-                style: TextStyle(
-                  fontSize: AppTheme.fontMD * _fontSize,
-                  color: AppTheme.textLight,
+            child: _translating && _displayText.isEmpty
+                ? _buildTranslatingPlaceholder()
+                : SelectionArea(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                // Extra bottom padding so text clears the sticky panel
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _buildHighlightedSegments(),
                 ),
-              ),
-            )
-                : SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: _buildHighlightedSegments(),
               ),
             ),
           ),
 
-          // Bottom controls
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildAudioRow(),
-                const SizedBox(height: 14),
-                if (widget.isNew && !_saved)
-                  ElevatedButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.bookmark_add_rounded, size: 28),
-                    label: Text(_tr.t('save')),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.success,
-                      minimumSize: const Size(double.infinity, 64),
-                    ),
-                  )
-                else if (_saved)
-                  OutlinedButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.bookmark_rounded, size: 26),
-                    label: Text(_tr.t('already_saved')),
-                  ),
-              ],
-            ),
-          ),
+          // ── Sticky bottom panel ───────────────────────────────────────────
+          _buildStickyPanel(),
         ],
       ),
     );
   }
 
-  // ── [IMAGE SIZE DEBUG] Banner widget showing original/compressed sizes ───────
-  // To remove: delete this entire method (_buildImageSizeBanner)
-  Widget _buildImageSizeBanner() {
-    final info = widget.imageSizeInfo!;
-    final wasCompressed = info.compressedKb != null;
+  // ── Sticky bottom panel with collapse arrow ───────────────────────────────
 
+  Widget _buildStickyPanel() {
     return Container(
-      width: double.infinity,
-      color: wasCompressed
-          ? AppTheme.accent.withOpacity(0.10)
-          : AppTheme.success.withOpacity(0.10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Icon(
-            wasCompressed ? Icons.compress_rounded : Icons.check_circle_rounded,
-            size: 20,
-            color: wasCompressed ? AppTheme.accent : AppTheme.success,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.10),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: AppTheme.textDark,
-                  height: 1.5,
-                ),
-                children: [
-                  TextSpan(
-                    text: '[DEBUG] Image: ',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+        ],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Collapse / expand arrow ───────────────────────────────────────
+          GestureDetector(
+            onTap: () => setState(() => _panelExpanded = !_panelExpanded),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Center(
+                child: AnimatedRotation(
+                  turns: _panelExpanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 40,
+                    color: AppTheme.primary,
                   ),
-                  TextSpan(text: 'Original ${info.originalKb} KB'),
-                  if (wasCompressed) ...[
-                    const TextSpan(text: '  →  Compressed '),
-                    TextSpan(
-                      text: '${info.compressedKb} KB',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.accent,
-                      ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Expandable content ────────────────────────────────────────────
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            crossFadeState: _panelExpanded
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                0,
+                16,
+                MediaQuery.of(context).padding.bottom + 16,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── Audio row ─────────────────────────────────────────────
+                  _buildAudioRow(),
+
+                  // ── Save button (only if not yet saved) ───────────────────
+                  if (!_saved) ...[
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: _save,
+                      icon: const Icon(Icons.save_rounded, size: 28),
+                      label: Text(_tr.t('save')),
                     ),
-                    TextSpan(
-                      text:
-                      '  (saved ${info.originalKb - info.compressedKb!} KB)',
-                      style: const TextStyle(color: AppTheme.textMedium),
-                    ),
-                  ] else
-                    const TextSpan(
-                      text: '  — under 500 KB, no compression needed',
-                      style: TextStyle(color: AppTheme.textMedium),
-                    ),
+                  ],
+
+                  const SizedBox(height: 4),
                 ],
               ),
             ),
+            secondChild: SizedBox(
+              height: MediaQuery.of(context).padding.bottom + 8,
+            ),
           ),
         ],
       ),
     );
   }
-  // ── [IMAGE SIZE DEBUG END] ────────────────────────────────────────────────────
+
+  Widget _buildTranslatingPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+              color: AppTheme.accent, strokeWidth: 4),
+          const SizedBox(height: 20),
+          Text(
+            _premium.isPremium ? 'Translating with AI…' : 'Translating…',
+            style: const TextStyle(
+              fontSize: AppTheme.fontMD,
+              color: AppTheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ── Segment widgets ───────────────────────────────────────────────────────
 
@@ -362,8 +430,9 @@ class _ResultScreenState extends State<ResultScreen> {
 
     final Map<int, List<int>> lineToSegments = {};
     for (int si = 0; si < _segments.length; si++) {
-      final origIdx = _segments[si].origLineIdx;
-      lineToSegments.putIfAbsent(origIdx, () => []).add(si);
+      lineToSegments
+          .putIfAbsent(_segments[si].origLineIdx, () => [])
+          .add(si);
     }
 
     final emittedLines = <int>{};
@@ -380,52 +449,68 @@ class _ResultScreenState extends State<ResultScreen> {
       if (segIndices.isEmpty || emittedLines.contains(origIdx)) continue;
       emittedLines.add(origIdx);
 
-      for (final si in segIndices) {
+      final spans = <TextSpan>[];
+      for (int k = 0; k < segIndices.length; k++) {
+        final si = segIndices[k];
         final seg = _segments[si];
         final isHighlighted = si == _highlightedLine;
 
-        widgets.add(
-          KeyedSubtree(
-            key: _segmentKeys[si],
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: isHighlighted
-                  ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
-                  : const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
-              decoration: BoxDecoration(
-                color: isHighlighted
-                    ? AppTheme.accent.withOpacity(0.18)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border: isHighlighted
-                    ? Border(
-                  left: BorderSide(color: AppTheme.accent, width: 4),
-                )
-                    : null,
+        spans.add(TextSpan(
+          text: k < segIndices.length - 1 ? '${seg.text} ' : seg.text,
+          style: TextStyle(
+            fontSize: AppTheme.fontMD * _fontSize,
+            color: isHighlighted
+                ? AppTheme.textDark
+                : AppTheme.textDark.withOpacity(0.75),
+            height: 1.7,
+            fontWeight:
+            isHighlighted ? FontWeight.w600 : FontWeight.w400,
+            backgroundColor: isHighlighted
+                ? AppTheme.accent.withOpacity(0.22)
+                : Colors.transparent,
+          ),
+        ));
+      }
+
+      final firstSi = segIndices.first;
+
+      widgets.add(
+        KeyedSubtree(
+          key: _segmentKeys[firstSi],
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: segIndices.any((si) => si == _highlightedLine)
+                ? const EdgeInsets.only(left: 8)
+                : EdgeInsets.zero,
+            decoration: segIndices.any((si) => si == _highlightedLine)
+                ? const BoxDecoration(
+              border: Border(
+                left: BorderSide(color: AppTheme.accent, width: 4),
               ),
-              child: SelectableText(
-                seg.text,
-                style: TextStyle(
-                  fontSize: AppTheme.fontMD * _fontSize,
-                  color: isHighlighted
-                      ? AppTheme.textDark
-                      : AppTheme.textDark.withOpacity(0.75),
-                  height: 1.7,
-                  fontWeight:
-                  isHighlighted ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
+            )
+                : null,
+            child: RichText(
+              text: TextSpan(children: spans),
             ),
           ),
-        );
+        ),
+      );
+
+      for (int k = 1; k < segIndices.length; k++) {
+        final si = segIndices[k];
+        widgets.add(Offstage(
+          key: _segmentKeys[si],
+          offstage: true,
+          child: const SizedBox.shrink(),
+        ));
       }
     }
 
     return widgets;
   }
 
-  // ── Audio row: Play/Stop button + Voice selector button ───────────────────
+  // ── Audio row ─────────────────────────────────────────────────────────────
 
   Widget _buildAudioRow() {
     final voiceName = _dataService.getPreferredVoiceName();
@@ -433,7 +518,6 @@ class _ResultScreenState extends State<ResultScreen> {
 
     return Row(
       children: [
-        // Main play/stop button — takes most of the width
         Expanded(
           child: ElevatedButton.icon(
             onPressed: _playing ? _stopReading : _startReading,
@@ -441,8 +525,8 @@ class _ResultScreenState extends State<ResultScreen> {
               backgroundColor: _playing ? AppTheme.danger : AppTheme.accent,
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 68),
-              shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               elevation: _playing ? 6 : 2,
             ),
             icon: Icon(
@@ -457,7 +541,6 @@ class _ResultScreenState extends State<ResultScreen> {
           ),
         ),
         const SizedBox(width: 10),
-        // Voice selection button
         Tooltip(
           message: hasCustomVoice ? 'Change voice' : 'Select voice',
           child: InkWell(
@@ -472,7 +555,9 @@ class _ResultScreenState extends State<ResultScreen> {
                     : AppTheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: hasCustomVoice ? AppTheme.primary : AppTheme.cardBorder,
+                  color: hasCustomVoice
+                      ? AppTheme.primary
+                      : AppTheme.cardBorder,
                   width: 2,
                 ),
               ),
@@ -481,7 +566,9 @@ class _ResultScreenState extends State<ResultScreen> {
                 children: [
                   Icon(
                     Icons.record_voice_over_rounded,
-                    color: hasCustomVoice ? AppTheme.primary : AppTheme.textLight,
+                    color: hasCustomVoice
+                        ? AppTheme.primary
+                        : AppTheme.textLight,
                     size: 26,
                   ),
                   const SizedBox(height: 2),

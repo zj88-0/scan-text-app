@@ -8,14 +8,12 @@ class DataService {
   static const String _languageKey = 'app_language';
   static const String _fontSizeKey = 'font_size';
   static const String _serverUrlKey = 'server_url';
-  static const String _preferredVoiceNameKey = 'preferred_voice_name';
-  static const String _preferredVoiceLocaleKey = 'preferred_voice_locale';
+
+  // Per-language voice keys use prefix + langCode, e.g. 'voice_name_en'
+  static const String _voiceNamePrefix = 'voice_name_';
+  static const String _voiceLocalePrefix = 'voice_locale_';
 
   // ── Paste your Firebase Function trigger URL below ───────────────────────
-  // Find it in Firebase Console → Functions → your function → Trigger URL.
-  // It will look like one of:
-  //   https://api-xxxxxxxx-as.a.run.app               (Cloud Run / Gen 2)
-  //   https://asia-southeast1-PROJECT_ID.cloudfunctions.net/api  (Gen 1)
   static const String _defaultServerUrl = 'https://api-udefzonqpa-as.a.run.app';
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -77,6 +75,20 @@ class DataService {
     await _p.setStringList(_savedTextsKey, updated);
   }
 
+  /// Updates an existing saved text in place (e.g. after adding a new translation).
+  Future<void> updateText(SavedText text) async {
+    final existing = _p.getStringList(_savedTextsKey) ?? [];
+    final updated = existing.map((s) {
+      try {
+        final t = SavedText.fromJsonString(s);
+        return t.id == text.id ? text.toJsonString() : s;
+      } catch (_) {
+        return s;
+      }
+    }).toList();
+    await _p.setStringList(_savedTextsKey, updated);
+  }
+
   Future<bool> textExists(String id) async {
     final texts = await getSavedTexts();
     return texts.any((t) => t.id == id);
@@ -111,19 +123,59 @@ class DataService {
     await _p.setString(_serverUrlKey, clean);
   }
 
-  // ─── Preferred TTS Voice ─────────────────────────────────────────────────────
+  // ─── Per-Language TTS Voice ──────────────────────────────────────────────────
 
-  String? getPreferredVoiceName() => _p.getString(_preferredVoiceNameKey);
+  /// Get the saved voice name for a specific language code. Returns null if none set.
+  String? getVoiceNameForLang(String langCode) =>
+      _p.getString('$_voiceNamePrefix$langCode');
 
-  String? getPreferredVoiceLocale() => _p.getString(_preferredVoiceLocaleKey);
+  /// Get the saved voice locale for a specific language code. Returns null if none set.
+  String? getVoiceLocaleForLang(String langCode) =>
+      _p.getString('$_voiceLocalePrefix$langCode');
 
-  Future<void> setPreferredVoice(String name, String locale) async {
-    await _p.setString(_preferredVoiceNameKey, name);
-    await _p.setString(_preferredVoiceLocaleKey, locale);
+  /// Save the preferred voice for a specific language code.
+  Future<void> setVoiceForLang(String langCode, String name, String locale) async {
+    await _p.setString('$_voiceNamePrefix$langCode', name);
+    await _p.setString('$_voiceLocalePrefix$langCode', locale);
   }
 
+  /// Clear the preferred voice for a specific language code.
+  Future<void> clearVoiceForLang(String langCode) async {
+    await _p.remove('$_voiceNamePrefix$langCode');
+    await _p.remove('$_voiceLocalePrefix$langCode');
+  }
+
+  /// Returns a map of langCode → {'name': ..., 'locale': ...} for all languages
+  /// that have a saved voice. Only includes entries where both name and locale exist.
+  Map<String, Map<String, String>> getAllSavedVoices(List<String> langCodes) {
+    final result = <String, Map<String, String>>{};
+    for (final code in langCodes) {
+      final name = getVoiceNameForLang(code);
+      final locale = getVoiceLocaleForLang(code);
+      if (name != null && locale != null) {
+        result[code] = {'name': name, 'locale': locale};
+      }
+    }
+    return result;
+  }
+
+  // ─── Legacy single-voice helpers (kept for backward compatibility) ────────────
+  // These delegate to the English voice slot so old call-sites don't break
+  // until they are updated to use the per-language variants above.
+
+  /// @deprecated Use getVoiceNameForLang(langCode) instead.
+  String? getPreferredVoiceName() => getVoiceNameForLang('en');
+
+  /// @deprecated Use getVoiceLocaleForLang(langCode) instead.
+  String? getPreferredVoiceLocale() => getVoiceLocaleForLang('en');
+
+  /// @deprecated Use setVoiceForLang(langCode, name, locale) instead.
+  Future<void> setPreferredVoice(String name, String locale) async {
+    await setVoiceForLang('en', name, locale);
+  }
+
+  /// @deprecated Use clearVoiceForLang(langCode) instead.
   Future<void> clearPreferredVoice() async {
-    await _p.remove(_preferredVoiceNameKey);
-    await _p.remove(_preferredVoiceLocaleKey);
+    await clearVoiceForLang('en');
   }
 }

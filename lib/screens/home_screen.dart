@@ -1,17 +1,14 @@
-import 'dart:io'; // covers File and Directory
-// ── [IMAGE SIZE DEBUG] Added dart:typed_data for Uint8List ──────────────────
+import 'dart:io';
 import 'dart:typed_data';
-// ────────────────────────────────────────────────────────────────────────────
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-// ── [IMAGE SIZE DEBUG] Added flutter_image_compress import ──────────────────
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-// ────────────────────────────────────────────────────────────────────────────
 import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/api_service.dart';
 import '../services/data_service.dart';
 import '../services/mlkit_translation_service.dart';
+import '../services/premium_service.dart';
 import '../services/translation_service.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/saved_text_card.dart';
@@ -33,11 +30,18 @@ class _HomeScreenState extends State<HomeScreen> {
   final DataService _dataService = DataService();
   final AppTranslations _tr = AppTranslations();
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
+  final PremiumService _premium = PremiumService();
 
   List<SavedText> _savedTexts = [];
   bool _loading = false;
   String _loadingStep = '';
   String _currentLang = 'en';
+
+  // ── Search state ──────────────────────────────────────────────────────────
+  bool _searchActive = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
 
   @override
   void initState() {
@@ -46,10 +50,55 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadSavedTexts();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadSavedTexts() async {
     final texts = await _dataService.getSavedTexts();
     if (mounted) setState(() => _savedTexts = texts);
   }
+
+  // ── Search helpers ────────────────────────────────────────────────────────
+
+  /// Returns only cards that have a name AND whose name contains [query] as a
+  /// contiguous subsequence (spaces count as characters).
+  /// e.g. query "del" matches "Dell receipt", "model info", "label".
+  List<SavedText> get _filteredTexts {
+    if (!_searchActive || _searchQuery.isEmpty) return _savedTexts;
+
+    final q = _searchQuery.toLowerCase();
+    return _savedTexts.where((t) {
+      if (t.name == null || t.name!.trim().isEmpty) return false;
+      return t.name!.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  void _openSearch() {
+    setState(() {
+      _searchActive = true;
+      _searchQuery = '';
+    });
+    _searchController.clear();
+    // Slight delay so the TextField is in the tree before requesting focus
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    setState(() {
+      _searchActive = false;
+      _searchQuery = '';
+    });
+    _searchController.clear();
+    _searchFocus.unfocus();
+  }
+
+  // ── Image helpers ─────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
     try {
@@ -66,15 +115,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ── [IMAGE SIZE DEBUG] Helper: check size and compress if over 500 KB ──────
-  // To remove: delete this entire method (_getOptimizedImage)
   Future<({Uint8List bytes, int originalKb, int? compressedKb})>
   _getOptimizedImage(File file) async {
     final int originalSize = file.lengthSync();
     final int originalKb = (originalSize / 1024).round();
 
     if (originalSize < 500 * 1024) {
-      // Under 500 KB — no compression needed
       return (
       bytes: await file.readAsBytes(),
       originalKb: originalKb,
@@ -82,7 +128,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Over 500 KB — compress
     final Uint8List? result = await FlutterImageCompress.compressWithFile(
       file.absolute.path,
       minWidth: 1024,
@@ -92,22 +137,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result != null) {
-      final int compressedKb = (result.length / 1024).round();
       return (
       bytes: result,
       originalKb: originalKb,
-      compressedKb: compressedKb,
+      compressedKb: (result.length / 1024).round(),
       );
     }
 
-    // Fallback if compression fails
     return (
     bytes: await file.readAsBytes(),
     originalKb: originalKb,
     compressedKb: null,
     );
   }
-  // ── [IMAGE SIZE DEBUG END] ──────────────────────────────────────────────────
 
   Future<void> _processImage(File imageFile) async {
     setState(() {
@@ -116,13 +158,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // ── [IMAGE SIZE DEBUG] Run size check + compression before OCR ──────────
-      // To remove: delete from here...
       setState(() => _loadingStep = 'Checking image size...');
       final imageInfo = await _getOptimizedImage(imageFile);
 
-      // Write compressed bytes to a temp file so the API receives the
-      // compressed image when compression was applied, otherwise use original.
       File fileToSend = imageFile;
       if (imageInfo.compressedKb != null) {
         final tempDir = await Directory.systemTemp.createTemp('ocr_compressed_');
@@ -130,25 +168,23 @@ class _HomeScreenState extends State<HomeScreen> {
         await tempFile.writeAsBytes(imageInfo.bytes);
         fileToSend = tempFile;
       }
-      // ...to here (and the imageSizeInfo: parameter below)
-      // ── [IMAGE SIZE DEBUG END] ───────────────────────────────────────────────
 
-      // Step 1: OCR from backend
       setState(() => _loadingStep = _tr.t('processing'));
-      // ── [IMAGE SIZE DEBUG] Use fileToSend (compressed if applicable) ─────────
-      // To remove: change fileToSend back to imageFile on the next line
       final originalText = await _apiService.processImage(fileToSend);
-      // ── [IMAGE SIZE DEBUG END] ───────────────────────────────────────────────
 
-      // Step 2: Translate locally using ML Kit
-      setState(() => _loadingStep = 'Translating...');
-      final translations = await _mlkit.translateToAllConfigured(originalText);
+      Map<String, String> translations = {};
+
+      if (_premium.isFree) {
+        setState(() => _loadingStep = 'Translating...');
+        translations = await _mlkit.translateToAllConfigured(originalText);
+      } else {
+        translations = {'en': originalText};
+      }
 
       setState(() => _loading = false);
 
       if (!mounted) return;
 
-      // Build a SavedText with the on-device translations (not yet saved)
       final result = SavedText(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         originalText: originalText,
@@ -163,10 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
             savedText: result,
             langCode: _currentLang,
             isNew: true,
-            // ── [IMAGE SIZE DEBUG] Pass size info to ResultScreen ──────────────
-            // To remove: delete this imageSizeInfo: line
             imageSizeInfo: imageInfo,
-            // ── [IMAGE SIZE DEBUG END] ─────────────────────────────────────────
           ),
         ),
       );
@@ -180,20 +213,99 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ── CRUD helpers ──────────────────────────────────────────────────────────
+
+  Future<void> _editTextName(SavedText text) async {
+    String? result = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final innerController =
+        TextEditingController(text: text.name ?? '');
+        return AlertDialog(
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'Name this entry',
+            style: TextStyle(
+              fontSize: AppTheme.fontMD,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.primary,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Give this scan a short name so it is easy to find later.',
+                style: TextStyle(
+                  fontSize: AppTheme.fontXS,
+                  color: AppTheme.textMedium,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: innerController,
+                autofocus: true,
+                maxLength: 60,
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  color: AppTheme.textDark,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'e.g. Doctor letter, Medicine label…',
+                  counterStyle: TextStyle(fontSize: AppTheme.fontXS),
+                ),
+              ),
+            ],
+          ),
+          actionsPadding: const EdgeInsets.all(16),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(100, 52),
+              ),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, innerController.text),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(100, 52),
+              ),
+              child: const Text('Save Name'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != null) {
+      final newName = result.trim();
+      text.name = newName.isEmpty ? null : newName;
+      await _dataService.updateText(text);
+      await _loadSavedTexts();
+    }
+  }
+
   Future<void> _deleteText(String id) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(_tr.t('delete_confirm'),
-            style: const TextStyle(fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold)),
+            style: const TextStyle(
+                fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold)),
         content: Text(_tr.t('delete_message'),
             style: const TextStyle(fontSize: AppTheme.fontSM)),
         actionsPadding: const EdgeInsets.all(16),
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+            style:
+            OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
             child: Text(_tr.t('cancel')),
           ),
           ElevatedButton(
@@ -231,32 +343,20 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadSavedTexts();
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tr.t('home_title')),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_rounded, size: 30),
-            tooltip: _tr.t('settings'),
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-              // Refresh language in case it changed
-              setState(() => _currentLang = _dataService.getLanguage());
-              await _loadSavedTexts();
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
+        title: _searchActive ? _buildSearchField() : Text(_tr.t('home_title')),
+        actions: _buildAppBarActions(),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Container(
             color: AppTheme.primary,
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            padding:
+            const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
             child: LanguageSelector(
               currentLang: _currentLang,
               onChanged: _changeLanguage,
@@ -268,6 +368,121 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: _loading ? null : _buildBottomButtons(),
     );
   }
+
+  // ── AppBar helpers ────────────────────────────────────────────────────────
+
+  Widget _buildSearchField() {
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.centerLeft,
+      child: TextField(
+        controller: _searchController,
+        focusNode: _searchFocus,
+        style: const TextStyle(
+          color: AppTheme.textDark,
+          fontSize: AppTheme.fontSM,
+        ),
+        cursorColor: AppTheme.primary,
+        decoration: InputDecoration(
+          hintText: 'Search by name…',
+          hintStyle: const TextStyle(
+            color: AppTheme.textLight,
+            fontSize: AppTheme.fontSM,
+          ),
+          prefixIcon: const Icon(
+            Icons.search_rounded,
+            color: AppTheme.primary,
+            size: 24,
+          ),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        onChanged: (v) => setState(() => _searchQuery = v),
+      ),
+    );
+  }
+
+  List<Widget> _buildAppBarActions() {
+    if (_searchActive) {
+      return [
+        // Clear query button (shown when there is text)
+        if (_searchQuery.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 26),
+            tooltip: 'Clear',
+            onPressed: () {
+              _searchController.clear();
+              setState(() => _searchQuery = '');
+              _searchFocus.requestFocus();
+            },
+          ),
+        // Close search entirely
+        IconButton(
+          icon: const Icon(Icons.search_off_rounded, size: 28),
+          tooltip: 'Close search',
+          onPressed: _closeSearch,
+        ),
+        const SizedBox(width: 4),
+      ];
+    }
+
+    return [
+      // Premium badge
+      if (_premium.isPremium)
+        Container(
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.accent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.auto_awesome_rounded, size: 16, color: Colors.white),
+              SizedBox(width: 4),
+              Text(
+                'Premium',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      // Search button — only shown when there are saved texts
+      if (_savedTexts.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.search_rounded, size: 30),
+          tooltip: 'Search by name',
+          onPressed: _openSearch,
+        ),
+      IconButton(
+        icon: const Icon(Icons.settings_rounded, size: 30),
+        tooltip: _tr.t('settings'),
+        onPressed: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          );
+          setState(() => _currentLang = _dataService.getLanguage());
+          await _loadSavedTexts();
+        },
+      ),
+      const SizedBox(width: 8),
+    ];
+  }
+
+  // ── Body ──────────────────────────────────────────────────────────────────
 
   Widget _buildLoading() {
     return Center(
@@ -319,12 +534,36 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    final displayed = _filteredTexts;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── List header ──────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
-          child: Text(
+          child: _searchActive && _searchQuery.isNotEmpty
+              ? RichText(
+            text: TextSpan(
+              style: const TextStyle(
+                fontSize: AppTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+              children: [
+                TextSpan(
+                  text: displayed.isEmpty
+                      ? 'No results for '
+                      : '${displayed.length} result${displayed.length == 1 ? '' : 's'} for ',
+                ),
+                TextSpan(
+                  text: '"$_searchQuery"',
+                  style: const TextStyle(color: AppTheme.accent),
+                ),
+              ],
+            ),
+          )
+              : Text(
             _tr.t('saved_texts'),
             style: const TextStyle(
               fontSize: AppTheme.fontLG,
@@ -333,12 +572,16 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+
+        // ── Cards ────────────────────────────────────────────────────────
         Expanded(
-          child: ListView.builder(
+          child: displayed.isEmpty
+              ? _buildNoResults()
+              : ListView.builder(
             padding: const EdgeInsets.only(bottom: 16),
-            itemCount: _savedTexts.length,
+            itemCount: displayed.length,
             itemBuilder: (ctx, i) {
-              final text = _savedTexts[i];
+              final text = displayed[i];
               return SavedTextCard(
                 savedText: text,
                 langCode: _currentLang,
@@ -353,14 +596,51 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   );
-                  setState(() => _currentLang = _dataService.getLanguage());
+                  setState(
+                          () => _currentLang = _dataService.getLanguage());
                 },
                 onDelete: () => _deleteText(text.id),
+                onEditName: () => _editTextName(text),
               );
             },
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildNoResults() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.manage_search_rounded,
+                size: 80, color: AppTheme.primary.withOpacity(0.20)),
+            const SizedBox(height: 20),
+            Text(
+              'No named entries match\n"$_searchQuery"',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: AppTheme.fontSM,
+                color: AppTheme.textMedium,
+                height: 1.6,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Only entries with a name are searched.\nTap the ✎ icon on a card to add a name.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontXS,
+                color: AppTheme.textLight,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

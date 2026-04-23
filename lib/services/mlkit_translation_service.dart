@@ -24,12 +24,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// launch.  The user must tap the Download button in Settings to get it back.
 class OnDeviceTranslationService {
   static final OnDeviceTranslationService _instance =
-      OnDeviceTranslationService._internal();
+  OnDeviceTranslationService._internal();
   factory OnDeviceTranslationService() => _instance;
   OnDeviceTranslationService._internal();
 
   final OnDeviceTranslatorModelManager _modelManager =
-      OnDeviceTranslatorModelManager();
+  OnDeviceTranslatorModelManager();
 
   // ── SharedPreferences keys ────────────────────────────────────────────────
   static const String _configKey = 'translation_languages';
@@ -272,18 +272,9 @@ class OnDeviceTranslationService {
   /// Downloads default languages that satisfy BOTH conditions:
   ///   1. Not currently on disk ([isModelDownloaded] → false), AND
   ///   2. Never been successfully downloaded ([wasEverDownloaded] → false).
-  ///
-  /// This means:
-  ///   • First launch → all 4 defaults are missing and unknown → download all.
-  ///   • Subsequent launches → all 4 are recorded → skip, no download shown.
-  ///   • User deletes English in Settings → registry cleared → next launch
-  ///     will NOT auto-redownload (user made a deliberate choice).
-  ///   • User re-adds English via Settings → explicit download, registry
-  ///     re-populated → subsequent launches skip it again.
   Future<void> ensureDefaultModels({
     void Function(String langCode, int current, int total)? onProgress,
   }) async {
-    // Only download if BOTH: not on disk AND never downloaded before
     final missing = <String>[];
     for (final code in defaultLanguageCodes) {
       final onDisk = await isModelDownloaded(code);
@@ -297,7 +288,7 @@ class OnDeviceTranslationService {
 
     int completed = 0;
     await Future.wait(missing.map((code) async {
-      await downloadModel(code); // also marks registry on success
+      await downloadModel(code);
       completed++;
       onProgress?.call(code, completed, missing.length);
     }));
@@ -333,6 +324,14 @@ class OnDeviceTranslationService {
       results[code] = await _translateOne(text, code);
     }
     return results;
+  }
+
+  /// Translate [text] from English to a single [targetCode].
+  /// Used for one-off translations such as the voice preview sentence.
+  Future<String> translateSingleTo(String text, String targetCode) async {
+    if (text.isEmpty) return text;
+    if (targetCode == 'en') return text;
+    return _translateOne(text, targetCode);
   }
 
   Future<String> _translateOne(String text, String targetCode) async {

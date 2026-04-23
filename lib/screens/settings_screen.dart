@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
-import '../services/api_service.dart';
 import '../services/data_service.dart';
 import '../services/mlkit_translation_service.dart';
+import '../services/premium_service.dart';
 import '../services/translation_service.dart';
 import '../services/wifi_check_service.dart';
 import 'voice_selection_screen.dart';
@@ -16,13 +16,10 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final DataService _dataService = DataService();
-  final ApiService _apiService = ApiService();
   final AppTranslations _tr = AppTranslations();
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final WiFiCheckService _wifiCheck = WiFiCheckService();
-
-  bool _testing = false;
-  String? _testResult;
+  final PremiumService _premium = PremiumService();
 
   List<String> _configuredLanguages = [];
   List<String> _activeLanguages = [];
@@ -48,22 +45,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _downloadStatus = status);
   }
 
-  // ── Connection test ───────────────────────────────────────────────────────
-
-  Future<void> _testConnection() async {
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final ok = await _apiService.checkHealth();
-    setState(() {
-      _testing = false;
-      _testResult = ok
-          ? '✅  Connected successfully!'
-          : '❌  Cannot connect. Check your internet connection.';
-    });
-  }
-
   // ── Language model actions ────────────────────────────────────────────────
 
   Future<void> _toggleActive(String code) async {
@@ -79,7 +60,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
         return;
       }
-      final newActive = _activeLanguages.where((c) => c != code).toList();
+      final newActive =
+      _activeLanguages.where((c) => c != code).toList();
       await _mlkit.setConfiguredLanguages(newActive);
       setState(() => _activeLanguages = newActive);
     } else {
@@ -97,7 +79,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
         actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         title: const Text(
@@ -118,8 +101,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 56)),
-            child: const Text('OK',
-                style: TextStyle(fontSize: AppTheme.fontSM)),
+            child:
+            const Text('OK', style: TextStyle(fontSize: AppTheme.fontSM)),
           ),
         ],
       ),
@@ -156,22 +139,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
         title: const Text(
           'Remove Language',
           style: TextStyle(
               fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Remove ${_mlkit.displayName(code)} from your language list and delete its translation model from this device?',
+          'Remove ${_mlkit.displayName(code)} from your language list and '
+              'delete its translation model from this device?',
           style: const TextStyle(fontSize: AppTheme.fontSM, height: 1.5),
         ),
         actionsPadding: const EdgeInsets.all(16),
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style:
-            OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+            style: OutlinedButton.styleFrom(
+                minimumSize: const Size(100, 52)),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -191,7 +176,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _deleting.add(code));
     await _mlkit.deleteModel(code);
 
-    final newConfigured = _configuredLanguages.where((c) => c != code).toList();
+    final newConfigured =
+    _configuredLanguages.where((c) => c != code).toList();
     final newActive = _activeLanguages.where((c) => c != code).toList();
     await _mlkit.setConfiguredLanguages(newActive);
 
@@ -229,7 +215,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   List<DropdownMenuItem<String>> _buildAddLanguageItems() {
-    final available = OnDeviceTranslationService.allSupportedLanguages.entries
+    final available =
+    OnDeviceTranslationService.allSupportedLanguages.entries
         .where((e) => !_configuredLanguages.contains(e.key))
         .toList()
       ..sort((a, b) => a.value.compareTo(b.value));
@@ -261,7 +248,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Voice Settings ────────────────────────────────────────────
-            _sectionTitle(Icons.record_voice_over_rounded, _tr.t('voice_settings')),
+            _sectionTitle(
+                Icons.record_voice_over_rounded, _tr.t('voice_settings')),
             const SizedBox(height: 12),
             _buildVoiceSettingsCard(),
 
@@ -270,7 +258,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 24),
 
             // ── Translation Languages ─────────────────────────────────────
-            _sectionTitle(Icons.translate_rounded, 'Translation Languages'),
+            _sectionTitle(
+                Icons.translate_rounded, 'Translation Languages'),
             const SizedBox(height: 8),
             Container(
               padding:
@@ -335,91 +324,257 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Server Connection ─────────────────────────────────────────
-            _sectionTitle(Icons.cloud_rounded, 'Server Connection'),
-            const SizedBox(height: 12),
+            // ── Translation Plan ──────────────────────────────────────────
+            _buildPlanSection(),
 
-            // Read-only Firebase URL display
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Plan section ─────────────────────────────────────────────────────────
+
+  Widget _buildPlanSection() {
+    final isPremium = _premium.isPremium;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(Icons.auto_awesome_rounded, 'Translation Plan'),
+        const SizedBox(height: 8),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppTheme.primary.withOpacity(0.2), width: 1.5),
+          ),
+          child: const Text(
+            'Choose how the app translates your scanned text.\n\n'
+                '• Free  — translations happen immediately using on-device models. '
+                'Fast and works without internet after the first setup.\n\n'
+                '• Premium  — translations are done by Groq AI and are natural '
+                'and context-aware. Only the language you select is translated, '
+                'saving data. Results are cached so each language is only '
+                'translated once per scan.',
+            style: TextStyle(
+              fontSize: AppTheme.fontXS,
+              color: AppTheme.textMedium,
+              height: 1.6,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        _buildTierCard(
+          isSelected: !isPremium,
+          icon: Icons.phone_android_rounded,
+          iconColor: AppTheme.primary,
+          title: 'Free',
+          subtitle: 'On-device translation · Works offline',
+          features: const [
+            'Instant translation for all languages',
+            'No internet needed after setup',
+            'Direct word-for-word translation',
+          ],
+          badgeLabel: 'Current Plan',
+          badgeColor: AppTheme.success,
+          showBadge: !isPremium,
+          onTap: isPremium
+              ? () async {
+            await _premium.setFree();
+            setState(() {});
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Switched to Free tier.')),
+            );
+          }
+              : null,
+          buttonLabel: isPremium ? 'Switch to Free' : 'Active',
+          buttonStyle: _TierButtonStyle.outlined,
+        ),
+
+        const SizedBox(height: 12),
+
+        _buildTierCard(
+          isSelected: isPremium,
+          icon: Icons.auto_awesome_rounded,
+          iconColor: AppTheme.accent,
+          title: 'Premium',
+          subtitle: 'AI translation by Groq · Natural & context-aware',
+          features: const [
+            'Natural, fluent translations',
+            'Names & abbreviations handled intelligently',
+            'Translates only when you open a language tab',
+            'Results cached — never re-translates same text',
+          ],
+          badgeLabel: 'Current Plan',
+          badgeColor: AppTheme.accent,
+          showBadge: isPremium,
+          onTap: !isPremium
+              ? () async {
+            await _premium.setPremium();
+            setState(() {});
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'Switched to Premium AI translation!')),
+            );
+          }
+              : null,
+          buttonLabel: isPremium ? 'Active' : 'Switch to Premium',
+          buttonStyle: _TierButtonStyle.elevated,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTierCard({
+    required bool isSelected,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required List<String> features,
+    required String badgeLabel,
+    required Color badgeColor,
+    required bool showBadge,
+    required VoidCallback? onTap,
+    required String buttonLabel,
+    required _TierButtonStyle buttonStyle,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? iconColor.withOpacity(0.05)
+            : AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isSelected ? iconColor : AppTheme.cardBorder,
+          width: isSelected ? 2.5 : 1.5,
+        ),
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: iconColor, size: 26),
               ),
-              child: Column(
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontMD,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? iconColor : AppTheme.textDark,
+                          ),
+                        ),
+                        if (showBadge) ...[
+                          const SizedBox(width: 8),
+                          _badge(badgeLabel, badgeColor),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontXS,
+                        color: AppTheme.textMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          ...features.map(
+                (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.cloud_done_rounded,
-                          color: AppTheme.success, size: 22),
-                      SizedBox(width: 10),
-                      Text(
-                        'Firebase Cloud Function',
-                        style: TextStyle(
-                          fontSize: AppTheme.fontSM,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.success,
-                        ),
+                  Icon(Icons.check_rounded, size: 18, color: iconColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      f,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontXS,
+                        color: AppTheme.textDark,
+                        height: 1.4,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _dataService.getServerUrl(),
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontXS,
-                      color: AppTheme.textMedium,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+          ),
 
-            // Test connection button
-            OutlinedButton.icon(
-              onPressed: _testing ? null : _testConnection,
-              icon: _testing
-                  ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              )
-                  : const Icon(Icons.wifi_tethering_rounded, size: 26),
-              label: Text(_testing ? 'Testing...' : 'Test Connection'),
-            ),
-            if (_testResult != null) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _testResult!.startsWith('✅')
-                        ? AppTheme.success
-                        : AppTheme.danger,
-                    width: 1.5,
-                  ),
-                ),
-                child: Text(
-                  _testResult!,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: _testResult!.startsWith('✅')
-                        ? AppTheme.success
-                        : AppTheme.danger,
-                    fontWeight: FontWeight.w600,
-                  ),
+          const SizedBox(height: 14),
+
+          SizedBox(
+            width: double.infinity,
+            child: buttonStyle == _TierButtonStyle.elevated
+                ? ElevatedButton(
+              onPressed: onTap,
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                onTap == null ? AppTheme.textLight : iconColor,
+                minimumSize: const Size(double.infinity, 52),
+              ),
+              child: Text(
+                buttonLabel,
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ],
-            const SizedBox(height: 24),
-          ],
-        ),
+            )
+                : OutlinedButton(
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(
+                  color: onTap == null
+                      ? AppTheme.textLight
+                      : AppTheme.primary,
+                  width: 2,
+                ),
+                minimumSize: const Size(double.infinity, 52),
+              ),
+              child: Text(
+                buttonLabel,
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -456,7 +611,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  hasVoice ? _friendlyName(voiceName!) : _tr.t('voice_default'),
+                  hasVoice
+                      ? _friendlyName(voiceName!)
+                      : _tr.t('voice_default'),
                   style: const TextStyle(
                     fontSize: AppTheme.fontSM,
                     fontWeight: FontWeight.w600,
@@ -483,7 +640,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 MaterialPageRoute(
                     builder: (_) => const VoiceSelectionScreen()),
               );
-              setState(() {}); // refresh displayed voice name
+              setState(() {});
             },
             style: ElevatedButton.styleFrom(
               minimumSize: const Size(80, 44),
@@ -509,7 +666,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .join(' ');
   }
 
-  // ── Widgets ───────────────────────────────────────────────────────────────
+  // ── Shared widgets ────────────────────────────────────────────────────────
 
   Widget _sectionTitle(IconData icon, String title) {
     return Row(
@@ -564,7 +721,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 height: 12,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isDownloaded ? AppTheme.success : AppTheme.textLight,
+                  color: isDownloaded
+                      ? AppTheme.success
+                      : AppTheme.textLight,
                 ),
               ),
               const SizedBox(width: 12),
@@ -618,7 +777,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
           if (isDownloading || isDeleting)
-            Center(
+            const Center(
               child: SizedBox(
                 width: 32,
                 height: 32,
@@ -838,3 +997,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
+
+// ── Internal enum for button styling ─────────────────────────────────────────
+
+enum _TierButtonStyle { elevated, outlined }

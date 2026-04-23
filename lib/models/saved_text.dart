@@ -7,11 +7,15 @@ class SavedText {
   final Map<String, String> translations;
   final DateTime createdAt;
 
+  /// Optional user-defined label shown on the card. Null means no name set.
+  String? name;
+
   SavedText({
     required this.id,
     required this.originalText,
     required this.translations,
     required this.createdAt,
+    this.name,
   });
 
   String get english => translations['en'] ?? originalText;
@@ -34,6 +38,7 @@ class SavedText {
     'originalText': originalText,
     'translations': translations,
     'createdAt': createdAt.toIso8601String(),
+    if (name != null) 'name': name,
   };
 
   factory SavedText.fromJson(Map<String, dynamic> json) => SavedText(
@@ -41,6 +46,7 @@ class SavedText {
     originalText: json['originalText'] as String,
     translations: Map<String, String>.from(json['translations'] as Map),
     createdAt: DateTime.parse(json['createdAt'] as String),
+    name: json['name'] as String?,
   );
 
   String toJsonString() => jsonEncode(toJson());

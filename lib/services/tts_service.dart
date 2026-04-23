@@ -4,8 +4,8 @@ import 'translation_service.dart';
 import 'data_service.dart';
 
 /// TtsService wraps flutter_tts for easy read-aloud of extracted text.
-/// Supports line-by-line highlighting via [speakAndWait], and per-voice
-/// selection via [speakWithVoice] and [applyPreferredVoice].
+/// Each language can have its own preferred voice, set via VoiceSelectionScreen.
+/// Falls back to locale-based voice selection when no preferred voice is saved.
 class TtsService {
   static final TtsService _instance = TtsService._internal();
   factory TtsService() => _instance;
@@ -50,37 +50,42 @@ class TtsService {
       _completer?.complete();
       _completer = null;
     });
-
-    await applyPreferredVoice();
   }
 
-  /// Apply the user's saved preferred voice.
-  Future<void> applyPreferredVoice() async {
+  /// Apply the user's saved preferred voice for a given [langCode].
+  /// If no voice is saved for that language, falls back to the locale for [langCode].
+  Future<void> applyPreferredVoice({String? langCode}) async {
     final data = DataService();
-    final voiceName = data.getPreferredVoiceName();
-    final voiceLocale = data.getPreferredVoiceLocale();
+    final code = langCode ?? AppTranslations().currentLang;
+    final voiceName = data.getVoiceNameForLang(code);
+    final voiceLocale = data.getVoiceLocaleForLang(code);
+
     if (voiceName != null && voiceLocale != null) {
       try {
         await _tts.setVoice({'name': voiceName, 'locale': voiceLocale});
+        return;
       } catch (_) {}
     }
+
+    // Fallback: use the locale for this language
+    final locale = AppTranslations.ttsLocales[code] ?? 'en-US';
+    await _tts.setLanguage(locale);
   }
 
-  /// Speak [text] (fire-and-forget). Uses preferred voice if set, else
-  /// falls back to locale derived from [langCode].
+  /// Speak [text] using the saved preferred voice for [langCode].
+  /// Falls back to locale-based selection if no voice is saved.
   Future<void> speak(String text, {String? langCode}) async {
     if (text.isEmpty) return;
 
     final data = DataService();
-    final preferredName = data.getPreferredVoiceName();
-    final preferredLocale = data.getPreferredVoiceLocale();
+    final code = langCode ?? AppTranslations().currentLang;
+    final preferredName = data.getVoiceNameForLang(code);
+    final preferredLocale = data.getVoiceLocaleForLang(code);
 
     if (preferredName != null && preferredLocale != null) {
       await _tts.setVoice({'name': preferredName, 'locale': preferredLocale});
     } else {
-      final locale = langCode != null
-          ? (AppTranslations.ttsLocales[langCode] ?? 'en-US')
-          : AppTranslations().ttsLocale;
+      final locale = AppTranslations.ttsLocales[code] ?? 'en-US';
       await _tts.setLanguage(locale);
     }
     await _tts.speak(text);

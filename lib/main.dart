@@ -4,6 +4,7 @@ import 'app_theme.dart';
 import 'screens/home_screen.dart';
 import 'services/data_service.dart';
 import 'services/mlkit_translation_service.dart';
+import 'services/premium_service.dart';          // ← NEW
 import 'services/translation_service.dart';
 import 'services/tts_service.dart';
 
@@ -24,6 +25,7 @@ void main() async {
   await AppTranslations().loadSaved();
   await TtsService().init();
   await OnDeviceTranslationService().init();
+  await PremiumService().init();                  // ← NEW
 
   runApp(const ElderlyReaderApp());
 }
@@ -44,8 +46,6 @@ class _ElderlyReaderAppState extends State<ElderlyReaderApp> {
       title: AppTranslations().t('app_name'),
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
-      // ModelGate checks if default models are downloaded.
-      // If not, it shows a friendly download screen before HomeScreen.
       home: ModelGate(onLanguageChanged: _onLanguageChanged),
     );
   }
@@ -78,7 +78,6 @@ class _ModelGateState extends State<ModelGate> {
   }
 
   Future<void> _check() async {
-    // See how many default models are missing
     int missing = 0;
     for (final code in OnDeviceTranslationService.defaultLanguageCodes) {
       if (!await _mlkit.isModelDownloaded(code)) missing++;
@@ -87,12 +86,10 @@ class _ModelGateState extends State<ModelGate> {
     if (!mounted) return;
 
     if (missing == 0) {
-      // All models present — go straight to home
       _goHome();
       return;
     }
 
-    // Need to download — show the download UI
     setState(() {
       _checking = false;
       _downloading = true;
@@ -140,7 +137,6 @@ class _ModelGateState extends State<ModelGate> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // App icon / logo area
               Container(
                 width: 100,
                 height: 100,
@@ -177,10 +173,10 @@ class _ModelGateState extends State<ModelGate> {
 
               if (_downloading || _done) ...[
                 const SizedBox(height: 6),
-                Text(
+                const Text(
                   'Downloading translation models.\nThis only happens once.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: AppTheme.fontSM,
                     color: AppTheme.textMedium,
                     height: 1.5,
@@ -194,7 +190,7 @@ class _ModelGateState extends State<ModelGate> {
                 LinearProgressIndicator(
                   value: (_total > 0 && _current > 0)
                       ? _current / _total
-                      : null, // indeterminate while checking
+                      : null,
                   backgroundColor: AppTheme.cardBorder,
                   color: AppTheme.accent,
                   minHeight: 10,
@@ -228,7 +224,6 @@ class _ModelGateState extends State<ModelGate> {
 
               const SizedBox(height: 48),
 
-              // Language chips to show what's being downloaded
               if (_downloading || _done)
                 Wrap(
                   spacing: 10,
