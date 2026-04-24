@@ -13,6 +13,10 @@ class DataService {
   static const String _voiceNamePrefix = 'voice_name_';
   static const String _voiceLocalePrefix = 'voice_locale_';
 
+  // ── Scan count keys ─────────────────────────────────────────────────────
+  static const String _scanCountKey = 'free_scan_count';
+  static const String _scanCountDateKey = 'free_scan_count_date';
+
   // ── Paste your Firebase Function trigger URL below ───────────────────────
   static const String _defaultServerUrl = 'https://api-udefzonqpa-as.a.run.app';
   // ─────────────────────────────────────────────────────────────────────────
@@ -177,5 +181,37 @@ class DataService {
   /// @deprecated Use clearVoiceForLang(langCode) instead.
   Future<void> clearPreferredVoice() async {
     await clearVoiceForLang('en');
+  }
+
+  // ─── Free-tier Scan Count ────────────────────────────────────────────────────
+
+  /// Returns today's date as a yyyy-MM-dd string.
+  String _todayKey() {
+    final now = DateTime.now();
+    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  /// How many scans have been used today (free tier).
+  int getFreeScanCount() {
+    final savedDate = _p.getString(_scanCountDateKey) ?? '';
+    if (savedDate != _todayKey()) return 0; // new day — reset in-memory
+    return _p.getInt(_scanCountKey) ?? 0;
+  }
+
+  /// Increment the daily free-tier scan counter and return the new value.
+  Future<int> incrementFreeScanCount() async {
+    final today = _todayKey();
+    final savedDate = _p.getString(_scanCountDateKey) ?? '';
+    int count = (savedDate == today) ? (_p.getInt(_scanCountKey) ?? 0) : 0;
+    count++;
+    await _p.setInt(_scanCountKey, count);
+    await _p.setString(_scanCountDateKey, today);
+    return count;
+  }
+
+  /// Reset the daily free-tier scan counter (useful after upgrading to premium).
+  Future<void> resetFreeScanCount() async {
+    await _p.remove(_scanCountKey);
+    await _p.remove(_scanCountDateKey);
   }
 }

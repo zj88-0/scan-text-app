@@ -14,6 +14,7 @@ import '../widgets/language_selector.dart';
 import '../widgets/saved_text_card.dart';
 import 'result_screen.dart';
 import 'settings_screen.dart';
+import 'upgrade_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onLanguageChanged;
@@ -32,6 +33,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final PremiumService _premium = PremiumService();
 
+  // Right-panel scaffold key
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   List<SavedText> _savedTexts = [];
   bool _loading = false;
   String _loadingStep = '';
@@ -42,6 +46,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
+
+  static const int _freeDailyLimit = 3;
 
   @override
   void initState() {
@@ -64,12 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Search helpers ────────────────────────────────────────────────────────
 
-  /// Returns only cards that have a name AND whose name contains [query] as a
-  /// contiguous subsequence (spaces count as characters).
-  /// e.g. query "del" matches "Dell receipt", "model info", "label".
   List<SavedText> get _filteredTexts {
     if (!_searchActive || _searchQuery.isEmpty) return _savedTexts;
-
     final q = _searchQuery.toLowerCase();
     return _savedTexts.where((t) {
       if (t.name == null || t.name!.trim().isEmpty) return false;
@@ -78,12 +80,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openSearch() {
+    // Close the end drawer if open
+    if (_scaffoldKey.currentState?.isEndDrawerOpen == true) {
+      Navigator.pop(context);
+    }
     setState(() {
       _searchActive = true;
       _searchQuery = '';
     });
     _searchController.clear();
-    // Slight delay so the TextField is in the tree before requesting focus
     Future.delayed(const Duration(milliseconds: 80), () {
       if (mounted) _searchFocus.requestFocus();
     });
@@ -98,9 +103,111 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchFocus.unfocus();
   }
 
+  // ── Free-tier scan limit ──────────────────────────────────────────────────
+
+  /// Returns true if the user can scan, false if limit is reached.
+  bool _canScan() {
+    if (_premium.isPremium) return true;
+    return _dataService.getFreeScanCount() < _freeDailyLimit;
+  }
+
+  void _showScanLimitDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        title: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.accent.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.document_scanner_rounded,
+                size: 48,
+                color: AppTheme.accent,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Daily Limit Reached',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontLG,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'You have used all 3 free scans for today.\n\n'
+              'Upgrade to Premium for unlimited scans, natural AI translation, '
+              'and much more.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: AppTheme.fontSM,
+            color: AppTheme.textDark,
+            height: 1.6,
+          ),
+        ),
+        actions: [
+          // Upgrade button
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+              );
+              setState(() {}); // refresh premium badge / scan count
+            },
+            icon: const Icon(Icons.auto_awesome_rounded, size: 22),
+            label: const Text(
+              'Upgrade to Premium',
+              style: TextStyle(
+                fontSize: AppTheme.fontSM,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              minimumSize: const Size(double.infinity, 60),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Dismiss
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              minimumSize: const Size(double.infinity, 52),
+            ),
+            child: const Text(
+              'Maybe Later',
+              style: TextStyle(
+                fontSize: AppTheme.fontXS,
+                color: AppTheme.textMedium,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Image helpers ─────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
+    // Check free-tier scan limit before opening camera / gallery
+    if (!_canScan()) {
+      _showScanLimitDialog();
+      return;
+    }
+
     try {
       final picked = await _picker.pickImage(
         source: source,
@@ -172,6 +279,18 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _loadingStep = _tr.t('processing'));
       final originalText = await _apiService.processImage(fileToSend);
 
+      // Guard: if OCR returned nothing, bail out gracefully
+      if (originalText.trim().isEmpty) {
+        setState(() => _loading = false);
+        _showError(_tr.t('error_generic'));
+        return;
+      }
+
+      // Increment free-tier scan counter AFTER a successful OCR call
+      if (_premium.isFree) {
+        await _dataService.incrementFreeScanCount();
+      }
+
       Map<String, String> translations = {};
 
       if (_premium.isFree) {
@@ -181,9 +300,11 @@ class _HomeScreenState extends State<HomeScreen> {
         translations = {'en': originalText};
       }
 
-      setState(() => _loading = false);
-
+      // Re-check mounted BEFORE clearing loading state and navigating.
+      // On first run the widget can be remounted during the async gap.
       if (!mounted) return;
+
+      setState(() => _loading = false);
 
       final result = SavedText(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -348,6 +469,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         title: _searchActive ? _buildSearchField() : Text(_tr.t('home_title')),
         actions: _buildAppBarActions(),
@@ -364,8 +486,246 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+      // ── Right-side panel (end drawer) ─────────────────────────────────────
+      endDrawer: _buildEndDrawer(),
       body: _loading ? _buildLoading() : _buildBody(),
       bottomNavigationBar: _loading ? null : _buildBottomButtons(),
+    );
+  }
+
+  // ── Right-panel drawer ────────────────────────────────────────────────────
+
+  Widget _buildEndDrawer() {
+    final isPremium = _premium.isPremium;
+    final scansUsed = _dataService.getFreeScanCount();
+    final scansLeft = (_freeDailyLimit - scansUsed).clamp(0, _freeDailyLimit);
+
+    return Drawer(
+      width: 280,
+      backgroundColor: AppTheme.surface,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ──────────────────────────────────────────────────
+            Container(
+              width: double.infinity,
+              color: AppTheme.primary,
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.translate_rounded,
+                      color: Colors.white, size: 36),
+                  const SizedBox(height: 10),
+                  Text(
+                    _tr.t('app_name'),
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontLG,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Plan badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isPremium
+                          ? AppTheme.accent
+                          : Colors.white.withOpacity(0.20),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isPremium
+                              ? Icons.auto_awesome_rounded
+                              : Icons.phone_android_rounded,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          isPremium ? 'Premium' : 'Free Plan',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Search button ────────────────────────────────────────────
+            _drawerButton(
+              icon: Icons.search_rounded,
+              label: 'Search',
+              onTap: _savedTexts.isEmpty
+                  ? null
+                  : () {
+                Navigator.pop(context); // close drawer
+                _openSearch();
+              },
+              enabled: _savedTexts.isNotEmpty,
+            ),
+
+            const SizedBox(height: 4),
+
+            // ── Upgrade button ───────────────────────────────────────────
+            _drawerButton(
+              icon: Icons.auto_awesome_rounded,
+              label: isPremium ? 'Manage Plan' : 'Upgrade to Premium',
+              onTap: () async {
+                Navigator.pop(context);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+                );
+                setState(() {});
+              },
+              highlight: !isPremium,
+            ),
+
+            const SizedBox(height: 4),
+
+            // ── Settings button ──────────────────────────────────────────
+            _drawerButton(
+              icon: Icons.settings_rounded,
+              label: _tr.t('settings'),
+              onTap: () async {
+                Navigator.pop(context);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+                setState(() => _currentLang = _dataService.getLanguage());
+                await _loadSavedTexts();
+              },
+            ),
+
+            const Spacer(),
+
+            // ── Daily scan usage (free only) ─────────────────────────────
+            if (!isPremium) ...[
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.document_scanner_rounded,
+                          size: 20,
+                          color: scansLeft == 0
+                              ? AppTheme.danger
+                              : AppTheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Daily Scans',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontXS,
+                            fontWeight: FontWeight.bold,
+                            color: scansLeft == 0
+                                ? AppTheme.danger
+                                : AppTheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: scansUsed / _freeDailyLimit,
+                        minHeight: 10,
+                        backgroundColor: AppTheme.cardBorder,
+                        color: scansLeft == 0
+                            ? AppTheme.danger
+                            : AppTheme.accent,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$scansLeft of $_freeDailyLimit scans left today',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontXS,
+                        color: scansLeft == 0
+                            ? AppTheme.danger
+                            : AppTheme.textMedium,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else
+              const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A single large tappable row for the end drawer.
+  Widget _drawerButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    bool highlight = false,
+    bool enabled = true,
+  }) {
+    final color = highlight ? AppTheme.accent : AppTheme.primary;
+    final bgColor = highlight
+        ? AppTheme.accent.withOpacity(0.08)
+        : Colors.transparent;
+
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: highlight
+                ? Border.all(color: AppTheme.accent.withOpacity(0.4), width: 1.5)
+                : null,
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    fontWeight:
+                    highlight ? FontWeight.bold : FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  color: color.withOpacity(0.5), size: 22),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -412,7 +772,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _buildAppBarActions() {
     if (_searchActive) {
       return [
-        // Clear query button (shown when there is text)
         if (_searchQuery.isNotEmpty)
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 26),
@@ -423,7 +782,6 @@ class _HomeScreenState extends State<HomeScreen> {
               _searchFocus.requestFocus();
             },
           ),
-        // Close search entirely
         IconButton(
           icon: const Icon(Icons.search_off_rounded, size: 28),
           tooltip: 'Close search',
@@ -459,6 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+
       // Search button — only shown when there are saved texts
       if (_savedTexts.isNotEmpty)
         IconButton(
@@ -466,19 +825,14 @@ class _HomeScreenState extends State<HomeScreen> {
           tooltip: 'Search by name',
           onPressed: _openSearch,
         ),
+
+      // Hamburger menu — opens right panel
       IconButton(
-        icon: const Icon(Icons.settings_rounded, size: 30),
-        tooltip: _tr.t('settings'),
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SettingsScreen()),
-          );
-          setState(() => _currentLang = _dataService.getLanguage());
-          await _loadSavedTexts();
-        },
+        icon: const Icon(Icons.menu_rounded, size: 30),
+        tooltip: 'Menu',
+        onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
       ),
-      const SizedBox(width: 8),
+      const SizedBox(width: 4),
     ];
   }
 

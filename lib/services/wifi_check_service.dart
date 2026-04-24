@@ -83,7 +83,6 @@ class WiFiCheckService {
                 color: AppTheme.accent,
               ),
             ),
-            const SizedBox(height: 16),
             const Text(
               'Not on Wi-Fi',
               textAlign: TextAlign.center,

@@ -146,7 +146,10 @@ class _ModelGateState extends State<ModelGate> {
       _statusText = 'All set! Starting app…';
     });
 
-    await Future.delayed(const Duration(milliseconds: 800));
+    // Give ML Kit an extra moment to fully register newly-downloaded models.
+    // Without this, isModelDownloaded() can return false immediately after
+    // download on some devices, causing the first scan to return untranslated text.
+    await Future.delayed(const Duration(milliseconds: 1500));
     if (mounted) _goNext();
   }
 
