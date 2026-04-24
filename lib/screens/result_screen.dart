@@ -56,7 +56,8 @@ class _ResultScreenState extends State<ResultScreen> {
   bool _stopRequested = false;
 
   final ScrollController _scrollController = ScrollController();
-  final List<GlobalKey> _segmentKeys = [];
+  // Single key on the one SelectableText that holds all the text
+  final GlobalKey _fullTextKey = GlobalKey();
 
   @override
   void initState() {
@@ -101,9 +102,7 @@ class _ResultScreenState extends State<ResultScreen> {
       }
     }
 
-    _segmentKeys
-      ..clear()
-      ..addAll(List.generate(_segments.length, (_) => GlobalKey()));
+
   }
 
   // ── TTS control ───────────────────────────────────────────────────────────
@@ -144,26 +143,15 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   void _scrollToSegment(int index) {
-    if (index < 0 || index >= _segments.length) return;
-
-    final targetLineIdx = _segments[index].origLineIdx;
-    int anchorSi = index;
-    for (int i = 0; i < _segments.length; i++) {
-      if (_segments[i].origLineIdx == targetLineIdx) {
-        anchorSi = i;
-        break;
-      }
-    }
-
-    if (anchorSi >= _segmentKeys.length) return;
-    final key = _segmentKeys[anchorSi];
-    final ctx = key.currentContext;
-    if (ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
+    if (index < 0 || index >= _segments.length || !_scrollController.hasClients) return;
+    // Estimate the scroll offset based on how far through the segments we are.
+    final fraction = _segments.length > 1 ? index / (_segments.length - 1) : 0.0;
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    final target = (maxExtent * fraction).clamp(0.0, maxExtent);
+    _scrollController.animateTo(
+      target,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOut,
-      alignment: 0.25,
     );
   }
 
@@ -300,14 +288,16 @@ class _ResultScreenState extends State<ResultScreen> {
           Expanded(
             child: _translating && _displayText.isEmpty
                 ? _buildTranslatingPlaceholder()
-                : SelectionArea(
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                // Extra bottom padding so text clears the sticky panel
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: _buildHighlightedSegments(),
+                : SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              child: SelectableText.rich(
+                _buildFullSpan(),
+                key: _fullTextKey,
+                style: TextStyle(
+                  fontSize: AppTheme.fontMD * _fontSize,
+                  color: AppTheme.textDark.withOpacity(0.75),
+                  height: 1.7,
                 ),
               ),
             ),
@@ -422,92 +412,42 @@ class _ResultScreenState extends State<ResultScreen> {
     );
   }
 
-  // ── Segment widgets ───────────────────────────────────────────────────────
+  // ── Build one TextSpan tree for the entire text ──────────────────────────
+  // All segments live in a single SelectableText.rich so the user can select
+  // across paragraph boundaries. The highlighted segment gets a background
+  // colour and bold weight; everything else is plain.
 
-  List<Widget> _buildHighlightedSegments() {
-    final widgets = <Widget>[];
-    final allLines = _displayText.split('\n');
+  TextSpan _buildFullSpan() {
+    final allSpans = <InlineSpan>[];
 
-    final Map<int, List<int>> lineToSegments = {};
     for (int si = 0; si < _segments.length; si++) {
-      lineToSegments
-          .putIfAbsent(_segments[si].origLineIdx, () => [])
-          .add(si);
-    }
+      final seg = _segments[si];
+      final isHighlighted = si == _highlightedLine;
 
-    final emittedLines = <int>{};
-
-    for (int origIdx = 0; origIdx < allLines.length; origIdx++) {
-      final rawLine = allLines[origIdx];
-
-      if (rawLine.trim().isEmpty) {
-        widgets.add(const SizedBox(height: 16));
-        continue;
+      // Add a blank line before a segment that starts a new source line
+      // (except for the very first segment).
+      final isFirstInLine = si == 0 ||
+          _segments[si - 1].origLineIdx != seg.origLineIdx;
+      if (si > 0 && isFirstInLine) {
+        allSpans.add(const TextSpan(text: '\n\n'));
+      } else if (si > 0 && !isFirstInLine) {
+        // Space between sentences on the same line
+        allSpans.add(const TextSpan(text: ' '));
       }
 
-      final segIndices = lineToSegments[origIdx] ?? [];
-      if (segIndices.isEmpty || emittedLines.contains(origIdx)) continue;
-      emittedLines.add(origIdx);
-
-      final spans = <TextSpan>[];
-      for (int k = 0; k < segIndices.length; k++) {
-        final si = segIndices[k];
-        final seg = _segments[si];
-        final isHighlighted = si == _highlightedLine;
-
-        spans.add(TextSpan(
-          text: k < segIndices.length - 1 ? '${seg.text} ' : seg.text,
-          style: TextStyle(
-            fontSize: AppTheme.fontMD * _fontSize,
-            color: isHighlighted
-                ? AppTheme.textDark
-                : AppTheme.textDark.withOpacity(0.75),
-            height: 1.7,
-            fontWeight:
-            isHighlighted ? FontWeight.w600 : FontWeight.w400,
-            backgroundColor: isHighlighted
-                ? AppTheme.accent.withOpacity(0.22)
-                : Colors.transparent,
-          ),
-        ));
-      }
-
-      final firstSi = segIndices.first;
-
-      widgets.add(
-        KeyedSubtree(
-          key: _segmentKeys[firstSi],
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: segIndices.any((si) => si == _highlightedLine)
-                ? const EdgeInsets.only(left: 8)
-                : EdgeInsets.zero,
-            decoration: segIndices.any((si) => si == _highlightedLine)
-                ? const BoxDecoration(
-              border: Border(
-                left: BorderSide(color: AppTheme.accent, width: 4),
-              ),
-            )
-                : null,
-            child: RichText(
-              text: TextSpan(children: spans),
-            ),
-          ),
+      allSpans.add(TextSpan(
+        text: seg.text,
+        style: TextStyle(
+          fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w400,
+          color: isHighlighted ? AppTheme.textDark : null, // null = inherit
+          backgroundColor: isHighlighted
+              ? AppTheme.accent.withOpacity(0.22)
+              : Colors.transparent,
         ),
-      );
-
-      for (int k = 1; k < segIndices.length; k++) {
-        final si = segIndices[k];
-        widgets.add(Offstage(
-          key: _segmentKeys[si],
-          offstage: true,
-          child: const SizedBox.shrink(),
-        ));
-      }
+      ));
     }
 
-    return widgets;
+    return TextSpan(children: allSpans);
   }
 
   // ── Audio row ─────────────────────────────────────────────────────────────

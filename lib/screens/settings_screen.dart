@@ -355,12 +355,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           child: const Text(
             'Choose how the app translates your scanned text.\n\n'
-                '• Free  — translations happen immediately using on-device models. '
+                '• Free  — translations happen immediately using system models. '
                 'Fast and works without internet after the first setup.\n\n'
-                '• Premium  — translations are done by Groq AI and are natural '
+                '• Premium  — translations are done by AI and are natural '
                 'and context-aware. Only the language you select is translated, '
-                'saving data. Results are cached so each language is only '
-                'translated once per scan.',
+                'Results are cached locally, translated once per scan.',
             style: TextStyle(
               fontSize: AppTheme.fontXS,
               color: AppTheme.textMedium,
@@ -378,7 +377,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           subtitle: 'On-device translation · Works offline',
           features: const [
             'Instant translation for all languages',
-            'No internet needed after setup',
             'Direct word-for-word translation',
           ],
           badgeLabel: 'Current Plan',
@@ -405,12 +403,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: Icons.auto_awesome_rounded,
           iconColor: AppTheme.accent,
           title: 'Premium',
-          subtitle: 'AI translation by Groq · Natural & context-aware',
+          subtitle: 'AI translation · Natural & context-aware',
           features: const [
             'Natural, fluent translations',
             'Names & abbreviations handled intelligently',
-            'Translates only when you open a language tab',
-            'Results cached — never re-translates same text',
+            'Results cached locally',
           ],
           badgeLabel: 'Current Plan',
           badgeColor: AppTheme.accent,

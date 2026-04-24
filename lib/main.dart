@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'services/data_service.dart';
 import 'services/mlkit_translation_service.dart';
-import 'services/premium_service.dart';          // ← NEW
+import 'services/premium_service.dart';
 import 'services/translation_service.dart';
 import 'services/tts_service.dart';
+import 'services/wifi_check_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +27,7 @@ void main() async {
   await AppTranslations().loadSaved();
   await TtsService().init();
   await OnDeviceTranslationService().init();
-  await PremiumService().init();                  // ← NEW
+  await PremiumService().init();
 
   runApp(const ElderlyReaderApp());
 }
@@ -52,7 +54,8 @@ class _ElderlyReaderAppState extends State<ElderlyReaderApp> {
 }
 
 /// Shows a download progress screen if the 4 default models are not yet
-/// on the device, then navigates to HomeScreen automatically when done.
+/// on the device, then navigates to OnboardingScreen (first launch) or
+/// HomeScreen (returning user) automatically when done.
 class ModelGate extends StatefulWidget {
   final VoidCallback onLanguageChanged;
   const ModelGate({super.key, required this.onLanguageChanged});
@@ -67,6 +70,12 @@ class _ModelGateState extends State<ModelGate> {
   bool _checking = true;
   bool _downloading = false;
   bool _done = false;
+
+  // Set to true when we are waiting for the user to confirm the wifi dialog.
+  // While true the UI shows "Waiting for your confirmation…" instead of
+  // the spinner, so it does not look frozen.
+  bool _waitingForWifi = false;
+
   String _statusText = 'Checking language models…';
   int _current = 0;
   int _total = 0;
@@ -86,12 +95,34 @@ class _ModelGateState extends State<ModelGate> {
     if (!mounted) return;
 
     if (missing == 0) {
-      _goHome();
+      _goNext();
       return;
     }
 
+    // ── Wi-Fi check before first-time download ────────────────────────────
     setState(() {
       _checking = false;
+      _waitingForWifi = true;
+      _statusText = 'Checking your connection…';
+    });
+
+    final proceed = await WiFiCheckService().checkAndConfirm(context);
+
+    if (!mounted) return;
+
+    if (!proceed) {
+      // User chose to wait for Wi-Fi — keep showing the splash with a message.
+      setState(() {
+        _waitingForWifi = false;
+        _checking = true;
+        _statusText = 'Connect to Wi-Fi and reopen the app to continue.';
+      });
+      return;
+    }
+
+    // ── Start downloading ─────────────────────────────────────────────────
+    setState(() {
+      _waitingForWifi = false;
       _downloading = true;
       _total = missing;
       _statusText = 'Setting up translation…';
@@ -104,7 +135,7 @@ class _ModelGateState extends State<ModelGate> {
           _current = current;
           _total = total;
           _statusText =
-              'Downloading ${_mlkit.displayName(code)} ($current of $total)…';
+          'Downloading ${_mlkit.displayName(code)} ($current of $total)…';
         });
       },
     );
@@ -116,7 +147,26 @@ class _ModelGateState extends State<ModelGate> {
     });
 
     await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) _goHome();
+    if (mounted) _goNext();
+  }
+
+  /// After models are ready, go to OnboardingScreen on first launch,
+  /// or directly to HomeScreen for returning users.
+  Future<void> _goNext() async {
+    final seen = await OnboardingScreen.hasBeenSeen();
+    if (!mounted) return;
+
+    if (!seen) {
+      // First launch — show onboarding.
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) =>
+              OnboardingScreen(onLanguageChanged: widget.onLanguageChanged),
+        ),
+      );
+    } else {
+      _goHome();
+    }
   }
 
   void _goHome() {
@@ -163,8 +213,20 @@ class _ModelGateState extends State<ModelGate> {
               const SizedBox(height: 8),
 
               if (_checking)
+                Text(
+                  _statusText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    color: AppTheme.textMedium,
+                    height: 1.5,
+                  ),
+                ),
+
+              if (_waitingForWifi)
                 const Text(
-                  'Getting ready…',
+                  'Checking your connection…',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: AppTheme.fontSM,
                     color: AppTheme.textMedium,
