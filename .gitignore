@@ -7,6 +7,7 @@ node_modules
 .packages
 build/
 lib/firebase_options.dart
+lib/services/encryption_service.dart
 
 # OS generated files
 .DS_Store

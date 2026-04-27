@@ -1,6 +1,6 @@
 {
-  "app_name": "轻松阅读",
-  "home_title": "轻松阅读",
+  "app_name": "视力助手",
+  "home_title": "视力助手",
   "take_photo": "拍照",
   "upload_image": "上传图片",
   "saved_texts": "已保存文本",
@@ -41,7 +41,7 @@
   "voice_default_hint": "点击从设备中选择语音",
   "voice_choose_title": "选择语音",
   "voice_preview_hint": "点击扬声器试听，然后点击选择以使用。",
-  "voice_none": "未找到该语言的语音。\n\n您可以在手机的"无障碍功能"→"文字转语音"设置中安装更多语音。",
+  "voice_none": "未找到该语言的语音。\n\n您可以在手机的\"无障碍功能\"→\"文字转语音\"设置中安装更多语音。",
   "voice_set": "语音已设置为",
   "voice_preview_en": "你好！这是您所选语音的预览。",
   "voice_tab_all": "全部"

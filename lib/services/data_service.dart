@@ -1,25 +1,33 @@
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/saved_text.dart';
+import 'auth_service.dart';
 
 /// DataService handles all local data persistence for the app.
+///
+/// SCAN COUNT STRATEGY (free-tier enforcement):
+///   Firestore is the authoritative store for the daily scan count so the
+///   limit cannot be bypassed by reinstalling the app or clearing local data.
+///   Local SharedPreferences acts as a fast cache:
+///     • syncScanCountFromRemote() — pulls Firestore count into local cache.
+///       Call once after sign-in (done in _goNext inside main.dart).
+///     • getFreeScanCount()        — reads local cache synchronously (fast).
+///     • incrementFreeScanCount()  — increments in Firestore AND local cache.
+///     • resetFreeScanCount()      — clears both local and Firestore.
 class DataService {
-  static const String _savedTextsKey = 'saved_texts';
-  static const String _languageKey = 'app_language';
-  static const String _fontSizeKey = 'font_size';
-  static const String _serverUrlKey = 'server_url';
+  static const String _savedTextsKey   = 'saved_texts';
+  static const String _languageKey     = 'app_language';
+  static const String _fontSizeKey     = 'font_size';
+  static const String _serverUrlKey    = 'server_url';
 
-  // Per-language voice keys use prefix + langCode, e.g. 'voice_name_en'
-  static const String _voiceNamePrefix = 'voice_name_';
+  static const String _voiceNamePrefix   = 'voice_name_';
   static const String _voiceLocalePrefix = 'voice_locale_';
 
-  // ── Scan count keys ─────────────────────────────────────────────────────
-  static const String _scanCountKey = 'free_scan_count';
+  // Local scan-count cache keys (mirrors Firestore values after sync).
+  static const String _scanCountKey     = 'free_scan_count';
   static const String _scanCountDateKey = 'free_scan_count_date';
 
-  // ── Paste your Firebase Function trigger URL below ───────────────────────
   static const String _defaultServerUrl = 'https://api-udefzonqpa-as.a.run.app';
-  // ─────────────────────────────────────────────────────────────────────────
 
   static final DataService _instance = DataService._internal();
   factory DataService() => _instance;
@@ -29,8 +37,7 @@ class DataService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    // Clear any stale localhost / 10.0.x.x / 192.168.x.x URL saved from
-    // development so the app always falls back to the Firebase default.
+    // Clear any stale dev URLs saved from development.
     final saved = _prefs!.getString(_serverUrlKey) ?? '';
     if (saved.contains('localhost') ||
         saved.contains('127.0.0.1') ||
@@ -41,11 +48,13 @@ class DataService {
   }
 
   SharedPreferences get _p {
-    if (_prefs == null) throw StateError('DataService not initialised. Call init() first.');
+    if (_prefs == null) {
+      throw StateError('DataService not initialised. Call init() first.');
+    }
     return _prefs!;
   }
 
-  // ─── Saved Texts ────────────────────────────────────────────────────────────
+  // ─── Saved Texts ─────────────────────────────────────────────────────────
 
   Future<List<SavedText>> getSavedTexts() async {
     final raw = _p.getStringList(_savedTextsKey) ?? [];
@@ -79,7 +88,6 @@ class DataService {
     await _p.setStringList(_savedTextsKey, updated);
   }
 
-  /// Updates an existing saved text in place (e.g. after adding a new translation).
   Future<void> updateText(SavedText text) async {
     final existing = _p.getStringList(_savedTextsKey) ?? [];
     final updated = existing.map((s) {
@@ -102,7 +110,7 @@ class DataService {
     await _p.remove(_savedTextsKey);
   }
 
-  // ─── Language ────────────────────────────────────────────────────────────────
+  // ─── Language ─────────────────────────────────────────────────────────────
 
   String getLanguage() => _p.getString(_languageKey) ?? 'en';
 
@@ -110,7 +118,7 @@ class DataService {
     await _p.setString(_languageKey, langCode);
   }
 
-  // ─── Font Size ───────────────────────────────────────────────────────────────
+  // ─── Font Size ────────────────────────────────────────────────────────────
 
   double getFontSize() => _p.getDouble(_fontSizeKey) ?? 1.5;
 
@@ -118,7 +126,7 @@ class DataService {
     await _p.setDouble(_fontSizeKey, size);
   }
 
-  // ─── Server URL ──────────────────────────────────────────────────────────────
+  // ─── Server URL ───────────────────────────────────────────────────────────
 
   String getServerUrl() => _p.getString(_serverUrlKey) ?? _defaultServerUrl;
 
@@ -127,34 +135,28 @@ class DataService {
     await _p.setString(_serverUrlKey, clean);
   }
 
-  // ─── Per-Language TTS Voice ──────────────────────────────────────────────────
+  // ─── Per-Language TTS Voice ───────────────────────────────────────────────
 
-  /// Get the saved voice name for a specific language code. Returns null if none set.
   String? getVoiceNameForLang(String langCode) =>
       _p.getString('$_voiceNamePrefix$langCode');
 
-  /// Get the saved voice locale for a specific language code. Returns null if none set.
   String? getVoiceLocaleForLang(String langCode) =>
       _p.getString('$_voiceLocalePrefix$langCode');
 
-  /// Save the preferred voice for a specific language code.
   Future<void> setVoiceForLang(String langCode, String name, String locale) async {
     await _p.setString('$_voiceNamePrefix$langCode', name);
     await _p.setString('$_voiceLocalePrefix$langCode', locale);
   }
 
-  /// Clear the preferred voice for a specific language code.
   Future<void> clearVoiceForLang(String langCode) async {
     await _p.remove('$_voiceNamePrefix$langCode');
     await _p.remove('$_voiceLocalePrefix$langCode');
   }
 
-  /// Returns a map of langCode → {'name': ..., 'locale': ...} for all languages
-  /// that have a saved voice. Only includes entries where both name and locale exist.
   Map<String, Map<String, String>> getAllSavedVoices(List<String> langCodes) {
     final result = <String, Map<String, String>>{};
     for (final code in langCodes) {
-      final name = getVoiceNameForLang(code);
+      final name   = getVoiceNameForLang(code);
       final locale = getVoiceLocaleForLang(code);
       if (name != null && locale != null) {
         result[code] = {'name': name, 'locale': locale};
@@ -163,55 +165,83 @@ class DataService {
     return result;
   }
 
-  // ─── Legacy single-voice helpers (kept for backward compatibility) ────────────
-  // These delegate to the English voice slot so old call-sites don't break
-  // until they are updated to use the per-language variants above.
+  // ─── Legacy single-voice helpers ──────────────────────────────────────────
 
-  /// @deprecated Use getVoiceNameForLang(langCode) instead.
   String? getPreferredVoiceName() => getVoiceNameForLang('en');
-
-  /// @deprecated Use getVoiceLocaleForLang(langCode) instead.
   String? getPreferredVoiceLocale() => getVoiceLocaleForLang('en');
+  Future<void> setPreferredVoice(String name, String locale) async =>
+      setVoiceForLang('en', name, locale);
+  Future<void> clearPreferredVoice() async => clearVoiceForLang('en');
 
-  /// @deprecated Use setVoiceForLang(langCode, name, locale) instead.
-  Future<void> setPreferredVoice(String name, String locale) async {
-    await setVoiceForLang('en', name, locale);
+  // ─── Free-tier Scan Count ─────────────────────────────────────────────────
+
+  /// Pulls the authoritative count from Firestore into the local cache.
+  /// Call once after sign-in (done in _goNext inside main.dart).
+  /// HomeScreen reads the local cache synchronously via getFreeScanCount().
+  Future<void> syncScanCountFromRemote() async {
+    try {
+      final remote = await AuthService().getRemoteScanCount();
+      final today  = _todayKey();
+      await _p.setInt(_scanCountKey, remote);
+      await _p.setString(_scanCountDateKey, today);
+      debugPrint('[DataService] syncScanCountFromRemote → $remote');
+    } catch (e) {
+      debugPrint('[DataService] syncScanCountFromRemote error: $e');
+      // Keep whatever is in local cache.
+    }
   }
 
-  /// @deprecated Use clearVoiceForLang(langCode) instead.
-  Future<void> clearPreferredVoice() async {
-    await clearVoiceForLang('en');
-  }
-
-  // ─── Free-tier Scan Count ────────────────────────────────────────────────────
-
-  /// Returns today's date as a yyyy-MM-dd string.
   String _todayKey() {
     final now = DateTime.now();
-    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return '${now.year}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
   }
 
-  /// How many scans have been used today (free tier).
+  /// How many scans have been used today (free tier) — reads local cache.
+  /// Always returns 0 for a new day (local date check).
   int getFreeScanCount() {
     final savedDate = _p.getString(_scanCountDateKey) ?? '';
-    if (savedDate != _todayKey()) return 0; // new day — reset in-memory
+    if (savedDate != _todayKey()) return 0;
     return _p.getInt(_scanCountKey) ?? 0;
   }
 
-  /// Increment the daily free-tier scan counter and return the new value.
+  /// Increments the daily scan counter in Firestore (source of truth) AND
+  /// in the local cache. Returns the new count.
+  /// If Firestore fails, only the local count is incremented (offline fallback).
   Future<int> incrementFreeScanCount() async {
-    final today = _todayKey();
+    // 1. Increment in Firestore (authoritative).
+    int? remoteCount;
+    try {
+      remoteCount = await AuthService().incrementRemoteScanCount();
+      debugPrint('[DataService] incrementFreeScanCount remote → $remoteCount');
+    } catch (e) {
+      debugPrint('[DataService] Remote increment failed, using local fallback: $e');
+    }
+
+    // 2. Update local cache to match Firestore, or +1 locally if offline.
+    final today     = _todayKey();
     final savedDate = _p.getString(_scanCountDateKey) ?? '';
-    int count = (savedDate == today) ? (_p.getInt(_scanCountKey) ?? 0) : 0;
-    count++;
-    await _p.setInt(_scanCountKey, count);
+    final localCount = (savedDate == today) ? (_p.getInt(_scanCountKey) ?? 0) : 0;
+
+    final newCount = remoteCount ?? (localCount + 1);
+    await _p.setInt(_scanCountKey, newCount);
     await _p.setString(_scanCountDateKey, today);
-    return count;
+
+    debugPrint('[DataService] incrementFreeScanCount local cache → $newCount');
+    return newCount;
   }
 
-  /// Reset the daily free-tier scan counter (useful after upgrading to premium).
+  /// Resets the daily scan counter (call after upgrading to premium).
+  /// Clears both local cache and Firestore.
   Future<void> resetFreeScanCount() async {
     await _p.remove(_scanCountKey);
     await _p.remove(_scanCountDateKey);
+    try {
+      await AuthService().resetRemoteScanCount();
+      debugPrint('[DataService] resetFreeScanCount OK');
+    } catch (e) {
+      debugPrint('[DataService] Remote reset failed: $e');
+    }
   }
 }

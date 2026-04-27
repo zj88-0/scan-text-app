@@ -468,28 +468,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: AppBar(
-        title: _searchActive ? _buildSearchField() : Text(_tr.t('home_title')),
-        actions: _buildAppBarActions(),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Container(
-            color: AppTheme.primary,
-            padding:
-            const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-            child: LanguageSelector(
-              currentLang: _currentLang,
-              onChanged: _changeLanguage,
+    return PopScope(
+      canPop: false, // Prevent back navigation to the model-download loading screen
+      child: Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          title: _searchActive ? _buildSearchField() : Text(_tr.t('home_title')),
+          actions: _buildAppBarActions(),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(56),
+            child: Container(
+              color: AppTheme.primary,
+              padding:
+              const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              child: LanguageSelector(
+                currentLang: _currentLang,
+                onChanged: _changeLanguage,
+              ),
             ),
           ),
         ),
+        // ── Right-side panel (end drawer) ─────────────────────────────────────
+        endDrawer: _buildEndDrawer(),
+        body: _loading ? _buildLoading() : _buildBody(),
+        bottomNavigationBar: _loading ? null : _buildBottomButtons(),
       ),
-      // ── Right-side panel (end drawer) ─────────────────────────────────────
-      endDrawer: _buildEndDrawer(),
-      body: _loading ? _buildLoading() : _buildBody(),
-      bottomNavigationBar: _loading ? null : _buildBottomButtons(),
     );
   }
 

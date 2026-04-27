@@ -5,6 +5,7 @@ import '../services/mlkit_translation_service.dart';
 import '../services/premium_service.dart';
 import '../services/translation_service.dart';
 import '../services/wifi_check_service.dart';
+import '../services/auth_service.dart';
 import 'voice_selection_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,6 +21,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final WiFiCheckService _wifiCheck = WiFiCheckService();
   final PremiumService _premium = PremiumService();
+  final AuthService _auth = AuthService();
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: AppTheme.danger, size: 28),
+            SizedBox(width: 10),
+            Text(
+              'Sign Out',
+              style: TextStyle(
+                fontSize: AppTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.danger,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to sign out?',
+          style: TextStyle(fontSize: AppTheme.fontSM, height: 1.5),
+        ),
+        actionsPadding: const EdgeInsets.all(16),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              minimumSize: const Size(100, 52),
+            ),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await _auth.signOut();
+    // Pop every pushed route so AppRoot (which sits at the bottom of the
+    // navigator stack) is revealed. AppRoot rebuilds to LoginScreen when
+    // authStateChanges fires with null.
+    if (mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
 
   List<String> _configuredLanguages = [];
   List<String> _activeLanguages = [];
@@ -329,6 +385,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 12),
             _buildAddLanguageRow(),
+
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+
+            // ── Account ───────────────────────────────────────────────────
+            _sectionTitle(Icons.account_circle_rounded, 'Account'),
+            const SizedBox(height: 12),
+            _buildLogoutButton(),
 
             const SizedBox(height: 40),
           ],
@@ -832,6 +897,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           fontSize: 12,
           color: color,
           fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _logout,
+        icon: const Icon(Icons.logout_rounded, color: AppTheme.danger, size: 24),
+        label: const Text(
+          'Sign Out',
+          style: TextStyle(
+            fontSize: AppTheme.fontSM,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.danger,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(double.infinity, 56),
+          side: const BorderSide(color: AppTheme.danger, width: 2),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
       ),
     );
