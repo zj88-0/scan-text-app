@@ -1,60 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../app_theme.dart';
 import '../services/translation_service.dart';
-import 'home_screen.dart';
 
-/// OnboardingScreen — shown exactly once, right after the default translation
-/// models finish downloading on a new install.
+/// OnboardingScreen — shown exactly once per user account, right after
+/// the translation models finish downloading on a new install.
+/// [onDone] is called when the user dismisses the screen; the caller
+/// (AppRoot in main.dart) is responsible for persisting the seen status
+/// and navigating to HomeScreen.
 class OnboardingScreen extends StatelessWidget {
-  final VoidCallback onLanguageChanged;
+  final VoidCallback onDone;
 
-  const OnboardingScreen({super.key, required this.onLanguageChanged});
-
-  static const String _seenKey = 'onboarding_seen';
-
-  static Future<bool> hasBeenSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_seenKey) ?? false;
-  }
-
-  static Future<void> markSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_seenKey, true);
-  }
-
-  void _finish(BuildContext context) async {
-    await markSeen();
-    if (!context.mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => HomeScreen(onLanguageChanged: onLanguageChanged),
-      ),
-    );
-  }
+  const OnboardingScreen({super.key, required this.onDone});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
-          child: ElevatedButton.icon(
-            onPressed: () => _finish(context),
-            icon: const Icon(Icons.check_rounded, size: 28),
-            label: const Text("Got It — Let's Start!"),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 68),
-              textStyle: const TextStyle(
-                fontSize: AppTheme.fontMD,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-      ),
-      body: const SafeArea(
+      body: SafeArea(
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -74,7 +36,6 @@ class OnboardingScreen extends StatelessWidget {
                 ),
               ),
 
-
               const SizedBox(height: 28),
 
               // ── Point 1 ───────────────────────────────────────────────
@@ -85,6 +46,17 @@ class OnboardingScreen extends StatelessWidget {
                 body:
                 'AI can make mistakes. Translations may not always be '
                     '100% accurate.',
+              ),
+
+              const SizedBox(height: 16),
+
+              const _InfoCard(
+                icon: Icons.translate_rounded,
+                iconColor: AppTheme.accent,
+                title: 'Text saved store locally',
+                body:
+                'Text not saved online only you can view them. '
+                    'However, saved text does not share across different devices',
               ),
 
               const SizedBox(height: 16),
@@ -113,7 +85,24 @@ class OnboardingScreen extends StatelessWidget {
                     'viewed by AI.',
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
+
+              // ── CTA Button — only reachable after scrolling ────────────
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: ElevatedButton.icon(
+                  onPressed: onDone,
+                  icon: const Icon(Icons.check_rounded, size: 28),
+                  label: const Text("Got It — Let's Start!"),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 68),
+                    textStyle: const TextStyle(
+                      fontSize: AppTheme.fontMD,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

@@ -5,6 +5,9 @@ import 'auth_service.dart';
 
 /// DataService handles all local data persistence for the app.
 ///
+/// SAVED TEXTS are scoped per Firebase user. The SharedPreferences key is
+///   `saved_texts_<uid>` so two accounts on the same device never share data.
+///
 /// SCAN COUNT STRATEGY (free-tier enforcement):
 ///   Firestore is the authoritative store for the daily scan count so the
 ///   limit cannot be bypassed by reinstalling the app or clearing local data.
@@ -15,13 +18,16 @@ import 'auth_service.dart';
 ///     • incrementFreeScanCount()  — increments in Firestore AND local cache.
 ///     • resetFreeScanCount()      — clears both local and Firestore.
 class DataService {
-  static const String _savedTextsKey   = 'saved_texts';
+  // Legacy single-user key — kept only so we can migrate old data if needed.
+  static const String _savedTextsKeyLegacy = 'saved_texts';
+
   static const String _languageKey     = 'app_language';
   static const String _fontSizeKey     = 'font_size';
   static const String _serverUrlKey    = 'server_url';
 
-  static const String _voiceNamePrefix   = 'voice_name_';
-  static const String _voiceLocalePrefix = 'voice_locale_';
+  static const String _voiceNamePrefix      = 'voice_name_';
+  static const String _voiceLocalePrefix    = 'voice_locale_';
+
 
   // Local scan-count cache keys (mirrors Firestore values after sync).
   static const String _scanCountKey     = 'free_scan_count';
@@ -52,6 +58,17 @@ class DataService {
       throw StateError('DataService not initialised. Call init() first.');
     }
     return _prefs!;
+  }
+
+  // ─── Per-user saved-texts key ─────────────────────────────────────────────
+
+  /// Returns `saved_texts_<uid>` for the currently signed-in user, or falls
+  /// back to the legacy key if no user is available (should not normally happen
+  /// once the app requires sign-in, but keeps things safe).
+  String get _savedTextsKey {
+    final uid = AuthService().currentUser?.uid;
+    if (uid == null || uid.isEmpty) return _savedTextsKeyLegacy;
+    return 'saved_texts_$uid';
   }
 
   // ─── Saved Texts ─────────────────────────────────────────────────────────
@@ -244,4 +261,5 @@ class DataService {
       debugPrint('[DataService] Remote reset failed: $e');
     }
   }
+
 }

@@ -344,7 +344,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Expanded(
                     child: Text(
                       'Select up to $_maxActive languages to show in the app. '
-                          'Models are stored on your device — no internet needed after download.',
+                          'Models are stored on your device.',
                       style: const TextStyle(
                         fontSize: AppTheme.fontXS,
                         color: AppTheme.textMedium,

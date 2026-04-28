@@ -6,6 +6,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../services/mlkit_translation_service.dart';
 import '../services/premium_service.dart';
@@ -308,6 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final result = SavedText(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
+        userId: AuthService().currentUser?.uid ?? '',
         originalText: originalText,
         translations: Map<String, String>.from(translations),
         createdAt: DateTime.now(),

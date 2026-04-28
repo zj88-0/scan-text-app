@@ -3,6 +3,11 @@ import 'dart:convert';
 /// Represents a single saved OCR result with translations in configured languages.
 class SavedText {
   final String id;
+
+  /// The UID of the Firebase user who created this entry.
+  /// Used by DataService to scope storage keys per-account.
+  final String userId;
+
   final String originalText;
   final Map<String, String> translations;
   final DateTime createdAt;
@@ -12,6 +17,7 @@ class SavedText {
 
   SavedText({
     required this.id,
+    required this.userId,
     required this.originalText,
     required this.translations,
     required this.createdAt,
@@ -35,6 +41,7 @@ class SavedText {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'userId': userId,
     'originalText': originalText,
     'translations': translations,
     'createdAt': createdAt.toIso8601String(),
@@ -43,6 +50,8 @@ class SavedText {
 
   factory SavedText.fromJson(Map<String, dynamic> json) => SavedText(
     id: json['id'] as String,
+    // Graceful fallback for any records saved before this field was added.
+    userId: json['userId'] as String? ?? '',
     originalText: json['originalText'] as String,
     translations: Map<String, String>.from(json['translations'] as Map),
     createdAt: DateTime.parse(json['createdAt'] as String),

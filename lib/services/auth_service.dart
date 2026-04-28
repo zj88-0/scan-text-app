@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'encryption_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._internal();
@@ -161,14 +162,17 @@ class AuthService {
 
     // Build the document — all string fields encrypted, createdAt plain.
     final doc = <String, dynamic>{
-      'email'         : _enc.encrypt(user.email ?? ''),
-      'uid'           : _enc.encrypt(user.uid),
-      'tier'          : _enc.encrypt('free'),
-      'premiumSince'  : _enc.encrypt(''),
-      'scanLimit'     : _enc.encrypt('3'),
-      'dailyScanCount': _enc.encrypt('0'),
-      'dailyScanDate' : _enc.encrypt(today),
-      'createdAt'     : FieldValue.serverTimestamp(),
+      'email'          : _enc.encrypt(user.email ?? ''),
+      'uid'            : _enc.encrypt(user.uid),
+      'tier'           : _enc.encrypt('free'),
+      'premiumSince'   : _enc.encrypt(''),
+      'scanLimit'      : _enc.encrypt('3'),
+      'dailyScanCount' : _enc.encrypt('0'),
+      'dailyScanDate'  : _enc.encrypt(today),
+      // Tracks whether this account has seen the onboarding screen.
+      // 'false' on first write; set to 'true' after onboarding is dismissed.
+      'onboardingSeen' : _enc.encrypt('false'),
+      'createdAt'      : FieldValue.serverTimestamp(),
     };
 
     debugPrint('[AuthService] Document fields built — attempting Firestore set...');
@@ -204,8 +208,9 @@ class AuthService {
       'tier'          : _enc.decrypt(raw['tier']           as String? ?? ''),
       'premiumSince'  : _enc.decrypt(raw['premiumSince']   as String? ?? ''),
       'scanLimit'     : _enc.decrypt(raw['scanLimit']      as String? ?? ''),
-      'dailyScanCount': _enc.decrypt(raw['dailyScanCount'] as String? ?? '0'),
-      'dailyScanDate' : _enc.decrypt(raw['dailyScanDate']  as String? ?? ''),
+      'dailyScanCount' : _enc.decrypt(raw['dailyScanCount']  as String? ?? '0'),
+      'dailyScanDate'  : _enc.decrypt(raw['dailyScanDate']   as String? ?? ''),
+      'onboardingSeen' : _enc.decrypt(raw['onboardingSeen']  as String? ?? 'false'),
     };
   }
 
@@ -290,6 +295,75 @@ class AuthService {
       debugPrint('[AuthService] resetRemoteScanCount OK');
     } catch (e) {
       debugPrint('[AuthService] resetRemoteScanCount error: $e');
+    }
+  }
+
+  // ── Onboarding status ───────────────────────────────────────────────────────────
+
+  /// Whether this account has seen the onboarding screen.
+  ///
+  /// Check order (cheapest first):
+  ///   1. SharedPreferences key `onboarding_seen_<uid>`  → zero network cost.
+  ///   2. Firestore (single document read) on a cache miss, then writes
+  ///      the result back to SharedPreferences so subsequent calls are free.
+  Future<bool> hasSeenOnboarding() async {
+    final user = currentUser;
+    if (user == null) return false;
+    final uid  = user.uid;
+    final key  = 'onboarding_seen_$uid';
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1. Local cache hit?
+    if (prefs.containsKey(key)) {
+      final cached = prefs.getBool(key) ?? false;
+      debugPrint('[AuthService] hasSeenOnboarding: cache hit uid=$uid value=$cached');
+      return cached;
+    }
+
+    // 2. Cache miss — read Firestore once.
+    debugPrint('[AuthService] hasSeenOnboarding: cache miss uid=$uid — reading Firestore');
+    try {
+      final data = await getUserData();
+      final seen = (data?['onboardingSeen'] ?? 'false') == 'true';
+      // Populate cache so future calls are free.
+      await prefs.setBool(key, seen);
+      debugPrint('[AuthService] hasSeenOnboarding: cached Firestore result uid=$uid seen=$seen');
+      return seen;
+    } catch (e) {
+      debugPrint('[AuthService] hasSeenOnboarding error: $e');
+      return false; // Show onboarding on any error — safe default.
+    }
+  }
+
+  /// Marks onboarding as seen for the current user.
+  /// Writes to SharedPreferences first (instant), then Firestore
+  /// (so the flag survives reinstall / new device sign-in).
+  Future<void> markOnboardingSeen() async {
+    final user = currentUser;
+    if (user == null || !_enc.isReady) return;
+    final uid   = user.uid;
+    final key   = 'onboarding_seen_$uid';
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1. Local cache — write immediately so hasSeenOnboarding() is
+    //    instant for the rest of this session and all future sessions
+    //    on this device.
+    await prefs.setBool(key, true);
+    debugPrint('[AuthService] markOnboardingSeen: local cache written uid=$uid');
+
+    // 2. Firestore — persists across reinstalls and new devices.
+    try {
+      final docId = _enc.hashEmail(user.email ?? uid);
+      await _firestore.collection('users').doc(docId).update({
+        'onboardingSeen': _enc.encrypt('true'),
+      });
+      debugPrint('[AuthService] markOnboardingSeen: Firestore updated uid=$uid');
+    } catch (e) {
+      debugPrint('[AuthService] markOnboardingSeen Firestore error: $e');
+      // Local cache was already written — onboarding won\'t re-show
+      // this session. Firestore will sync correctly on the next sign-in
+      // when hasSeenOnboarding() re-reads from Firestore (cache miss
+      // only happens if the app is reinstalled, clearing SharedPrefs).
     }
   }
 

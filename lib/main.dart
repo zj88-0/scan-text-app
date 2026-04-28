@@ -67,7 +67,7 @@ class _ElderlyReaderAppState extends State<ElderlyReaderApp> {
 // guarantees sign-out always returns to LoginScreen cleanly.
 // ════════════════════════════════════════════════════════════════════════════
 
-enum _Screen { loading, signedOut, awaitingVerification, modelSetup, home }
+enum _Screen { loading, signedOut, awaitingVerification, modelSetup, onboarding, home }
 
 class AppRoot extends StatefulWidget {
   final VoidCallback onLanguageChanged;
@@ -161,8 +161,13 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       }
       _verificationTimer?.cancel();
       _verificationTimer = null;
-      // Guard: don't regress from home if userChanges fires again after setup.
-      if (_screen == _Screen.home) return;
+      // Guard: don't regress once we are past model setup.
+      // userChanges() / idTokenChanges() can re-fire on token refresh,
+      // and we must not restart the model check or overwrite the
+      // onboarding / home screen that is already showing.
+      if (_screen == _Screen.home ||
+          _screen == _Screen.onboarding ||
+          _screen == _Screen.modelSetup) return;
       setState(() => _screen = _Screen.modelSetup);
       if (!_modelSetupStarted) {
         _modelSetupStarted = true;
@@ -261,7 +266,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   Future<void> _goNext() async {
     // Guarantee the Firestore document exists — this is the definitive write
     // point. It runs after email verification for new users, and on every
-    // sign-in for returning users. merge:true means it never downgrades tier.
+    // sign-in for returning users.
     try {
       await AuthService().ensureUserDocument();
     } catch (e) {
@@ -272,11 +277,31 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     // HomeScreen's synchronous getFreeScanCount() is accurate from the start.
     DataService().syncScanCountFromRemote().catchError((_) {});
 
-    final seen = await OnboardingScreen.hasBeenSeen();
-    if (!mounted) return;
-    if (!seen) {
-      await OnboardingScreen.markSeen();
+    // Check whether this specific account has seen onboarding (stored in
+    // Firestore so it is per-user, not per-device).
+    bool seenOnboarding = false;
+    try {
+      seenOnboarding = await AuthService().hasSeenOnboarding();
+    } catch (e) {
+      debugPrint('[AppRoot] hasSeenOnboarding failed: $e');
     }
+
+    if (!mounted) return;
+    if (!seenOnboarding) {
+      setState(() => _screen = _Screen.onboarding);
+    } else {
+      setState(() => _screen = _Screen.home);
+    }
+  }
+
+  /// Called by OnboardingScreen when the user taps 'Got It'.
+  Future<void> _onOnboardingDone() async {
+    try {
+      await AuthService().markOnboardingSeen();
+    } catch (e) {
+      debugPrint('[AppRoot] markOnboardingSeen failed: $e');
+    }
+    if (!mounted) return;
     setState(() => _screen = _Screen.home);
   }
 
@@ -291,6 +316,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         return _buildVerificationWaiting();
       case _Screen.modelSetup:
         return _buildModelSetup();
+      case _Screen.onboarding:
+        return OnboardingScreen(onDone: _onOnboardingDone);
       case _Screen.home:
         return PopScope(
           canPop: false,

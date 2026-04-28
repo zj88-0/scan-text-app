@@ -99,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 30),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -124,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     size: 48,
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 10),
 
                 // ── Title ─────────────────────────────────────────────────
                 const Text(
@@ -135,7 +135,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Color(0xFF1A1D23),
                   ),
                 ),
-                const SizedBox(height: 8),
                 const Text(
                   'Sign in to continue',
                   style: TextStyle(
@@ -143,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Color(0xFF6B7280),
                   ),
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 15),
 
                 // ── Form card ─────────────────────────────────────────────
                 Container(
