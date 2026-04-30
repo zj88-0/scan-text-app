@@ -274,14 +274,24 @@ class OnDeviceTranslationService {
   ///   2. Never been successfully downloaded ([wasEverDownloaded] → false).
   Future<void> ensureDefaultModels({
     void Function(String langCode, int current, int total)? onProgress,
+    List<String>? alreadyMissing,
   }) async {
-    final missing = <String>[];
-    for (final code in defaultLanguageCodes) {
-      final onDisk = await isModelDownloaded(code);
-      final everHad = wasEverDownloaded(code);
-      if (!onDisk && !everHad) {
-        missing.add(code);
-      }
+    // If the caller already determined which models are missing (e.g. from a
+    // parallel pre-check in _checkModels), skip re-checking to avoid
+    // redundant sequential ML Kit calls.
+    List<String> missing;
+    if (alreadyMissing != null) {
+      missing = alreadyMissing;
+    } else {
+      // Parallel check — all 4 calls fire at the same time instead of one by one.
+      final checks = await Future.wait(
+        defaultLanguageCodes.map((code) async {
+          final onDisk = await isModelDownloaded(code);
+          final everHad = wasEverDownloaded(code);
+          return (!onDisk && !everHad) ? code : null;
+        }),
+      );
+      missing = checks.whereType<String>().toList();
     }
 
     if (missing.isEmpty) return;

@@ -204,13 +204,20 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   }
 
   Future<void> _checkModels() async {
-    int missing = 0;
-    for (final code in OnDeviceTranslationService.defaultLanguageCodes) {
-      if (!await _mlkit.isModelDownloaded(code)) missing++;
-    }
+    // Parallel check — all 4 isModelDownloaded calls fire simultaneously
+    // instead of one-by-one, saving ~2-4 seconds on slow devices.
+    final checks = await Future.wait(
+      OnDeviceTranslationService.defaultLanguageCodes.map((code) async {
+        final onDisk = await _mlkit.isModelDownloaded(code);
+        final everHad = _mlkit.wasEverDownloaded(code);
+        return (!onDisk && !everHad) ? code : null;
+      }),
+    );
+    final missingCodes = checks.whereType<String>().toList();
+
     if (!mounted) return;
 
-    if (missing == 0) {
+    if (missingCodes.isEmpty) {
       _goNext();
       return;
     }
@@ -237,11 +244,14 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     setState(() {
       _waitingForWifi = false;
       _downloading = true;
-      _total = missing;
+      _total = missingCodes.length;
       _statusText = 'Setting up translation…';
     });
 
+    // Pass the already-computed missing list so ensureDefaultModels skips
+    // its own redundant sequential isModelDownloaded loop.
     await _mlkit.ensureDefaultModels(
+      alreadyMissing: missingCodes,
       onProgress: (code, current, total) {
         if (!mounted) return;
         setState(() {
@@ -259,32 +269,25 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       _statusText = 'All set! Starting app…';
     });
 
-    await Future.delayed(const Duration(milliseconds: 1500));
+    await Future.delayed(const Duration(milliseconds: 800));
     if (mounted) _goNext();
   }
 
   Future<void> _goNext() async {
-    // Guarantee the Firestore document exists — this is the definitive write
-    // point. It runs after email verification for new users, and on every
-    // sign-in for returning users.
-    try {
-      await AuthService().ensureUserDocument();
-    } catch (e) {
-      debugPrint('[AppRoot] ensureUserDocument failed: $e');
-    }
-
-    // Sync the authoritative scan count from Firestore into local cache so
-    // HomeScreen's synchronous getFreeScanCount() is accurate from the start.
-    DataService().syncScanCountFromRemote().catchError((_) {});
-
-    // Check whether this specific account has seen onboarding (stored in
-    // Firestore so it is per-user, not per-device).
+    // Run both Firestore calls in parallel instead of sequentially.
     bool seenOnboarding = false;
     try {
-      seenOnboarding = await AuthService().hasSeenOnboarding();
+      final results = await Future.wait([
+        AuthService().ensureUserDocument(),
+        AuthService().hasSeenOnboarding(),
+      ]);
+      seenOnboarding = results[1] as bool;
     } catch (e) {
-      debugPrint('[AppRoot] hasSeenOnboarding failed: $e');
+      debugPrint('[AppRoot] _goNext setup failed: $e');
     }
+
+    // Fire-and-forget — does not block navigation.
+    DataService().syncScanCountFromRemote().catchError((_) {});
 
     if (!mounted) return;
     if (!seenOnboarding) {
