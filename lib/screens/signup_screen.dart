@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
+import '../app_theme.dart';
+import '../services/translation_service.dart';
+import '../widgets/global_language_icon.dart';
 
 /// SignUpScreen
 /// ─────────────
@@ -21,6 +24,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _passwordCtrl    = TextEditingController();
   final _confirmCtrl     = TextEditingController();
   final _auth            = AuthService();
+  final _tr              = AppTranslations();
 
   bool _awaitingVerification = false;
   String? _verifiedEmail;
@@ -38,16 +42,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
     if (e is FirebaseAuthException) {
       switch (e.code) {
         case 'email-already-in-use':
-          return 'An account already exists for that email.';
+          return _tr.t('signup_err_in_use');
         case 'invalid-email':
-          return 'Please enter a valid email address.';
+          return _tr.t('login_err_invalid_email');
         case 'weak-password':
-          return 'Password is too weak. Use at least 6 characters.';
+          return _tr.t('signup_err_weak_pass');
         default:
-          return e.message ?? 'Sign-up failed. Please try again.';
+          return e.message ?? _tr.t('signup_err_failed');
       }
     }
-    return 'Something went wrong. Please try again.';
+    return _tr.t('login_err_generic');
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -126,48 +130,54 @@ class _SignUpScreenState extends State<SignUpScreen> {
               color: Color(0xFF1A1D23), size: 28),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // ── Icon ──────────────────────────────────────────────────
                 Container(
-                  width: 80,
-                  height: 80,
+                  width: 64,
+                  height: 64,
                   decoration: BoxDecoration(
                     color: const Color(0xFF059669),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
                         color: const Color(0xFF059669).withOpacity(0.25),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
                   child: const Icon(Icons.person_add_rounded,
-                      color: Colors.white, size: 44),
+                      color: Colors.white, size: 36),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
 
-                const Text(
-                  'Create Account',
-                  style: TextStyle(
-                    fontSize: 26,
+                Text(
+                  _tr.t('signup_title'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontLG,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF1A1D23),
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Sign up to get started',
-                  style: TextStyle(fontSize: 15, color: Color(0xFF6B7280)),
+                const SizedBox(height: 4),
+                Text(
+                  _tr.t('signup_subtitle'),
+                  style: const TextStyle(fontSize: AppTheme.fontSM, color: Color(0xFF6B7280)),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 16),
 
                 // ── Form card ─────────────────────────────────────────────
                 Container(
@@ -182,7 +192,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                     ],
                   ),
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(16),
                   child: Form(
                     key: _formKey,
                     child: Column(
@@ -193,15 +203,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
                           decoration: _inputDecoration(
-                            label: 'Email Address',
+                            label: _tr.t('login_email_address'),
                             icon: Icons.email_outlined,
                           ),
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) {
-                              return 'Please enter your email';
+                              return _tr.t('login_err_empty_email');
                             }
                             if (!v.contains('@')) {
-                              return 'Please enter a valid email';
+                              return _tr.t('login_err_invalid_email');
                             }
                             return null;
                           },
@@ -214,7 +224,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           obscureText: _obscurePass,
                           textInputAction: TextInputAction.next,
                           decoration: _inputDecoration(
-                            label: 'Password',
+                            label: _tr.t('login_password'),
                             icon: Icons.lock_outline_rounded,
                           ).copyWith(
                             suffixIcon: IconButton(
@@ -230,10 +240,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                           validator: (v) {
                             if (v == null || v.isEmpty) {
-                              return 'Please enter a password';
+                              return _tr.t('login_err_empty_pass');
                             }
                             if (v.length < 6) {
-                              return 'Password must be at least 6 characters';
+                              return _tr.t('signup_err_weak_pass');
                             }
                             return null;
                           },
@@ -247,7 +257,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _signUp(),
                           decoration: _inputDecoration(
-                            label: 'Confirm Password',
+                            label: _tr.t('signup_confirm_pass'),
                             icon: Icons.lock_rounded,
                           ).copyWith(
                             suffixIcon: IconButton(
@@ -263,10 +273,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                           validator: (v) {
                             if (v == null || v.isEmpty) {
-                              return 'Please confirm your password';
+                              return _tr.t('signup_err_confirm');
                             }
                             if (v != _passwordCtrl.text) {
-                              return 'Passwords do not match';
+                              return _tr.t('signup_err_match');
                             }
                             return null;
                           },
@@ -287,18 +297,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               _errorMsg!,
                               style: const TextStyle(
                                 color: Color(0xFFDC2626),
-                                fontSize: 14,
+                                fontSize: AppTheme.fontXS,
                               ),
                             ),
                           ),
                         ],
 
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
 
                         // Sign up button
                         SizedBox(
                           width: double.infinity,
-                          height: 56,
+                          height: 52,
                           child: ElevatedButton(
                             onPressed: _loading ? null : _signUp,
                             style: ElevatedButton.styleFrom(
@@ -316,10 +326,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2.5),
                             )
-                                : const Text(
-                              'Create Account',
-                              style: TextStyle(
-                                fontSize: 17,
+                                : Text(
+                              _tr.t('signup_btn_create'),
+                              style: const TextStyle(
+                                fontSize: AppTheme.fontSM,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -330,25 +340,25 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
                 // ── Sign in link ──────────────────────────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  alignment: WrapAlignment.center,
                   children: [
-                    const Text(
-                      'Already have an account? ',
+                    Text(
+                      '${_tr.t('signup_already')} ',
                       style:
-                      TextStyle(color: Color(0xFF6B7280), fontSize: 15),
+                      const TextStyle(color: Color(0xFF6B7280), fontSize: AppTheme.fontSM),
                     ),
                     GestureDetector(
                       onTap: () => Navigator.pop(context),
-                      child: const Text(
-                        'Sign In',
-                        style: TextStyle(
+                      child: Text(
+                        _tr.t('login_sign_in'),
+                        style: const TextStyle(
                           color: Color(0xFF1A56DB),
                           fontWeight: FontWeight.bold,
-                          fontSize: 15,
+                          fontSize: AppTheme.fontSM,
                         ),
                       ),
                     ),
@@ -408,6 +418,7 @@ class _VerificationScreen extends StatefulWidget {
 class _VerificationScreenState extends State<_VerificationScreen>
     with WidgetsBindingObserver {
   final _auth = AuthService();
+  final _tr = AppTranslations();
 
   // ── Proceed button state ─────────────────────────────────────────────────
   bool _proceedLoading = false;
@@ -508,8 +519,8 @@ class _VerificationScreenState extends State<_VerificationScreen>
       await _auth.sendVerificationEmail();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not send email. Please try again later.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_tr.t('verify_err_resend')),
           backgroundColor: Colors.red,
         ));
       }
@@ -517,10 +528,10 @@ class _VerificationScreenState extends State<_VerificationScreen>
     }
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Verification email sent! Check your inbox.'),
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(_tr.t('verify_msg_resent')),
       backgroundColor: Colors.green,
-      duration: Duration(seconds: 3),
+      duration: const Duration(seconds: 3),
     ));
 
     // Start 60-second cooldown
@@ -543,57 +554,78 @@ class _VerificationScreenState extends State<_VerificationScreen>
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // ── Icon ────────────────────────────────────────────────
                 Container(
-                  width: 88,
-                  height: 88,
+                  width: 72,
+                  height: 72,
                   decoration: BoxDecoration(
                     color: const Color(0xFF059669),
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
                         color: const Color(0xFF059669).withOpacity(0.25),
-                        blurRadius: 20,
-                        offset: const Offset(0, 6),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
                   child: const Icon(Icons.mark_email_unread_rounded,
-                      color: Colors.white, size: 48),
+                      color: Colors.white, size: 40),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
 
-                const Text(
-                  'Check Your Email',
-                  style: TextStyle(
-                    fontSize: 26,
+                Text(
+                  _tr.t('signup_check_email'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontLG,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF1A1D23),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
-                  'We sent a verification link to\n${widget.email}\n\n'
-                      'Tap the link in that email, then come back and press the button below.',
+                  _tr.t('verify_desc_1'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontSM,
                     color: Color(0xFF6B7280),
-                    height: 1.6,
+                    height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 28),
+                Text(
+                  widget.email,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    color: Color(0xFF1A1D23),
+                    fontWeight: FontWeight.w600,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _tr.t('signup_check_desc_1'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    color: Color(0xFF6B7280),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // ── Proceed button ───────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
-                  height: 56,
+                  height: 52,
                   child: ElevatedButton.icon(
                     onPressed: _proceedLoading ? null : _onProceed,
                     icon: _proceedLoading
@@ -604,9 +636,9 @@ class _VerificationScreenState extends State<_VerificationScreen>
                     )
                         : const Icon(Icons.check_circle_rounded),
                     label: Text(
-                      _proceedLoading ? 'Checking…' : "I've Verified — Continue",
+                      _proceedLoading ? _tr.t('verify_checking') : _tr.t('verify_btn_check'),
                       style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
+                          fontSize: AppTheme.fontSM, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF059669),
@@ -634,16 +666,16 @@ class _VerificationScreenState extends State<_VerificationScreen>
                         color: const Color(0xFFFEF3C7),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Row(
+                      child: Row(
                         children: [
                           Icon(Icons.info_outline_rounded,
                               color: Color(0xFFD97706), size: 18),
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Email not verified yet — please click the link in your inbox first.',
-                              style: TextStyle(
-                                  color: Color(0xFFD97706), fontSize: 13),
+                              _tr.t('verify_err_not_yet'),
+                              style: const TextStyle(
+                                  color: Color(0xFFD97706), fontSize: AppTheme.fontXS),
                             ),
                           ),
                         ],
@@ -653,7 +685,7 @@ class _VerificationScreenState extends State<_VerificationScreen>
                       : const SizedBox.shrink(),
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
                 // ── Resend button with cooldown ───────────────────────────
                 SizedBox(
@@ -664,10 +696,10 @@ class _VerificationScreenState extends State<_VerificationScreen>
                     icon: const Icon(Icons.send_rounded),
                     label: Text(
                       canResend
-                          ? 'Resend Verification Email'
-                          : 'Resend in ${_resendCooldown}s',
+                          ? _tr.t('signup_resend')
+                          : '${_tr.t('signup_resend_in')} ${_resendCooldown}s',
                       style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold),
+                          fontSize: AppTheme.fontSM, fontWeight: FontWeight.bold),
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF059669),
@@ -693,14 +725,21 @@ class _VerificationScreenState extends State<_VerificationScreen>
                     await _auth.signOut();
                     if (mounted) Navigator.pop(context);
                   },
-                  child: const Text(
-                    'Use a different account',
-                    style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
+                  child: Text(
+                    _tr.t('verify_diff_account'),
+                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: AppTheme.fontXS),
                   ),
                 ),
               ],
             ),
           ),
+        ),
+        Positioned(
+          top: 16,
+          right: 16,
+          child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+        ),
+        ],
         ),
       ),
     );

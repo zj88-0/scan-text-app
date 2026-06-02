@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
+import '../services/data_service.dart';
+import '../app_theme.dart';
 import 'signup_screen.dart';
 import 'forgot_password_screen.dart';
+import '../services/translation_service.dart';
+import '../widgets/global_language_icon.dart';
 
 /// LoginScreen
 /// ───────────
-/// Email + Password login, Google Sign-In button, links to SignUp and
-/// ForgotPassword screens.  Replace [onSuccess] navigation with your
-/// own route (e.g. push HomeScreen) once integrated.
+/// Email + Password login, Google Sign-In button, Guest login, links to SignUp and
+/// ForgotPassword screens.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -17,32 +20,50 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey      = GlobalKey<FormState>();
-  final _emailCtrl    = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  final _auth         = AuthService();
+  final _auth = AuthService();
 
-  bool _loading       = false;
-  bool _obscurePass   = true;
+  bool _loading = false;
+  bool _obscurePass = true;
   String? _errorMsg;
+  final _tr = AppTranslations();
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   void _setError(String? msg) => setState(() => _errorMsg = msg);
-  void _setLoading(bool v)    => setState(() => _loading = v);
+  void _setLoading(bool v) => setState(() => _loading = v);
 
   String _friendlyError(dynamic e) {
     if (e is FirebaseAuthException) {
       switch (e.code) {
-        case 'user-not-found':  return 'No account found for that email.';
-        case 'wrong-password':  return 'Incorrect password. Please try again.';
-        case 'invalid-email':   return 'Please enter a valid email address.';
-        case 'user-disabled':   return 'This account has been disabled.';
-        case 'too-many-requests': return 'Too many attempts. Try again later.';
-        default: return e.message ?? 'Sign-in failed. Please try again.';
+        case 'user-not-found':
+          return _tr.t('login_err_user_not_found');
+        case 'wrong-password':       // legacy Firebase SDK — wrong password only
+          return _tr.t('login_err_wrong_pass');
+        case 'invalid-credential':   // modern Firebase SDK (v9+) — wrong email OR password (can't distinguish)
+          return _tr.t('login_err_invalid_credential');
+        case 'invalid-email':
+          return _tr.t('login_err_invalid_email');
+        case 'user-disabled':
+          return _tr.t('login_err_disabled');
+        case 'too-many-requests':
+          return _tr.t('login_err_too_many');
+        default:
+          return e.message ?? _tr.t('login_err_failed');
       }
     }
-    return 'Something went wrong. Please try again.';
+    
+    final errorStr = e.toString().toLowerCase();
+    if (errorStr.contains('platformexception') || 
+        errorStr.contains('missingplugin') || 
+        errorStr.contains('network_error') || 
+        errorStr.contains('sign_in_failed')) {
+      return _tr.t('login_err_no_google');
+    }
+    
+    return _tr.t('login_err_generic');
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -56,8 +77,6 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailCtrl.text.trim(),
         _passwordCtrl.text,
       );
-      // Firebase authStateChanges fires → AuthGate rebuilds → ModelGate shown.
-      // No manual navigation needed.
     } catch (e) {
       if (mounted) _setError(_friendlyError(e));
     } finally {
@@ -70,14 +89,27 @@ class _LoginScreenState extends State<LoginScreen> {
     _setLoading(true);
     try {
       final cred = await _auth.signInWithGoogle();
-      // cred == null means the user cancelled the Google picker — do nothing.
-      // If sign-in succeeded, Firebase authStateChanges fires and AuthGate
-      // rebuilds automatically — no manual navigation needed here.
       if (cred == null && mounted) {
         _setLoading(false);
       }
     } catch (e) {
       if (mounted) _setError(_friendlyError(e));
+    } finally {
+      if (mounted) _setLoading(false);
+    }
+  }
+
+  /// Guest login — uses Firebase anonymous sign-in.
+  /// Daily scan limit (3) is enforced locally via DataService / SharedPreferences.
+  Future<void> _guestLogin() async {
+    _setError(null);
+    _setLoading(true);
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+      // DataService scan count is keyed per UID, so guest gets its own slot.
+      // Sync from remote is skipped for anonymous users — local cache is authoritative.
+    } catch (e) {
+      if (mounted) _setError(_tr.t('login_err_guest'));
     } finally {
       if (mounted) _setLoading(false);
     }
@@ -95,60 +127,29 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
+      backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 30),
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // ── Logo / Icon ───────────────────────────────────────────
-                Container(
-                  width: 88,
-                  height: 88,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A56DB),
-                    borderRadius: BorderRadius.circular(22),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF1A56DB).withOpacity(0.25),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.lock_rounded,
-                    color: Colors.white,
-                    size: 48,
-                  ),
+                Image.asset(
+                  'assets/img/VisionAID_logo.png',
+                  width: 180,
                 ),
-                const SizedBox(height: 10),
-
-                // ── Title ─────────────────────────────────────────────────
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A1D23),
-                  ),
-                ),
-                const Text(
-                  'Sign in to continue',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF6B7280),
-                  ),
-                ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 12),
 
                 // ── Form card ─────────────────────────────────────────────
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppTheme.surface,
                     borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppTheme.cardBorder, width: 1.5),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.06),
@@ -157,7 +158,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
-                  padding: const EdgeInsets.all(24),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Form(
                     key: _formKey,
                     child: Column(
@@ -167,21 +169,25 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _emailCtrl,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
+                          style: const TextStyle(
+                            fontSize: AppTheme.fontSM,
+                            color: AppTheme.textDark,
+                          ),
                           decoration: _inputDecoration(
-                            label: 'Email Address',
+                            label: _tr.t('login_email_address'),
                             icon: Icons.email_outlined,
                           ),
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) {
-                              return 'Please enter your email';
+                              return _tr.t('login_err_empty_email');
                             }
                             if (!v.contains('@')) {
-                              return 'Please enter a valid email';
+                              return _tr.t('login_err_invalid_email');
                             }
                             return null;
                           },
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
 
                         // Password
                         TextFormField(
@@ -189,8 +195,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           obscureText: _obscurePass,
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _signIn(),
+                          style: const TextStyle(
+                            fontSize: AppTheme.fontSM,
+                            color: AppTheme.textDark,
+                          ),
                           decoration: _inputDecoration(
-                            label: 'Password',
+                            label: _tr.t('login_password'),
                             icon: Icons.lock_outline_rounded,
                           ).copyWith(
                             suffixIcon: IconButton(
@@ -198,7 +208,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 _obscurePass
                                     ? Icons.visibility_off_outlined
                                     : Icons.visibility_outlined,
-                                color: const Color(0xFF6B7280),
+                                color: AppTheme.textLight,
+                                size: 26,
                               ),
                               onPressed: () =>
                                   setState(() => _obscurePass = !_obscurePass),
@@ -206,12 +217,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           validator: (v) {
                             if (v == null || v.isEmpty) {
-                              return 'Please enter your password';
+                              return _tr.t('login_err_empty_pass');
                             }
                             return null;
                           },
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 2),
 
                         // Forgot password
                         Align(
@@ -222,12 +233,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               MaterialPageRoute(
                                 builder: (_) => const ForgotPasswordScreen(),
                               ),
-                            ),
-                            child: const Text(
-                              'Forgot Password?',
-                              style: TextStyle(
-                                color: Color(0xFF1A56DB),
+                            ).then((_) {
+                              if (mounted) setState(() {});
+                            }),
+                            child: Text(
+                              _tr.t('login_forgot_password'),
+                              style: const TextStyle(
+                                color: AppTheme.primary,
                                 fontWeight: FontWeight.w600,
+                                fontSize: AppTheme.fontXS,
                               ),
                             ),
                           ),
@@ -239,31 +253,33 @@ class _LoginScreenState extends State<LoginScreen> {
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
+                                horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFEE2E2),
+                              color: AppTheme.danger.withOpacity(0.10),
                               borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: AppTheme.danger.withOpacity(0.3)),
                             ),
                             child: Text(
                               _errorMsg!,
                               style: const TextStyle(
-                                color: Color(0xFFDC2626),
-                                fontSize: 14,
+                                color: AppTheme.danger,
+                                fontSize: AppTheme.fontXS,
                               ),
                             ),
                           ),
                         ],
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 12),
 
                         // Sign in button
                         SizedBox(
                           width: double.infinity,
-                          height: 56,
+                          height: 68,
                           child: ElevatedButton(
                             onPressed: _loading ? null : _signIn,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1A56DB),
+                              backgroundColor: AppTheme.primary,
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
@@ -272,17 +288,74 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             child: _loading
                                 ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2.5),
-                            )
-                                : const Text(
-                              'Sign In',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.bold,
-                              ),
+                                    width: 26,
+                                    height: 26,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2.5),
+                                  )
+                                : Text(
+                                    _tr.t('login_sign_in'),
+                                    style: const TextStyle(
+                                      fontSize: AppTheme.fontMD,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // ── Divider ───────────────────────────────────────────────
+                Row(
+                  children: [
+                    const Expanded(child: Divider(color: AppTheme.cardBorder)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: Text(
+                        _tr.t('login_or_continue_with'),
+                        style: const TextStyle(
+                          color: AppTheme.textLight,
+                          fontSize: AppTheme.fontXS,
+                        ),
+                      ),
+                    ),
+                    const Expanded(child: Divider(color: AppTheme.cardBorder)),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Google button ─────────────────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  height: 68,
+                  child: OutlinedButton(
+                    onPressed: _loading ? null : _googleSignIn,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: AppTheme.surface,
+                      side: const BorderSide(
+                          color: AppTheme.cardBorder, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _GoogleLogo(),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            _tr.t('login_continue_with_google'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: AppTheme.fontMD,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textDark,
                             ),
                           ),
                         ),
@@ -291,77 +364,74 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
-                // ── Divider ───────────────────────────────────────────────
-                Row(
-                  children: [
-                    const Expanded(child: Divider(color: Color(0xFFD1D5DB))),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Text(
-                        'or continue with',
-                        style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    const Expanded(child: Divider(color: Color(0xFFD1D5DB))),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // ── Google button ─────────────────────────────────────────
+                // ── Guest login button ────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
-                  height: 56,
-                  child: OutlinedButton.icon(
-                    onPressed: _loading ? null : _googleSignIn,
-                    icon: _GoogleLogo(),
-                    label: const Text(
-                      'Continue with Google',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A1D23),
-                      ),
-                    ),
+                  height: 68,
+                  child: OutlinedButton(
+                    onPressed: _loading ? null : _guestLogin,
                     style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFD1D5DB), width: 1.5),
+                      backgroundColor: AppTheme.background,
+                      side: const BorderSide(
+                          color: AppTheme.textLight, width: 1.5),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.person_outline_rounded,
+                          size: 32,
+                          color: AppTheme.textMedium,
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            _tr.t('login_continue_as_guest'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: AppTheme.fontMD,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textMedium,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 12),
 
                 // ── Sign up link ──────────────────────────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  alignment: WrapAlignment.center,
                   children: [
-                    const Text(
-                      "Don't have an account? ",
-                      style: TextStyle(color: Color(0xFF6B7280), fontSize: 15),
+                    Text(
+                      "${_tr.t('login_no_account')} ",
+                      style: const TextStyle(
+                          color: AppTheme.textMedium,
+                          fontSize: AppTheme.fontXS),
                     ),
                     GestureDetector(
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                          const SignUpScreen(),
+                          builder: (_) => const SignUpScreen(),
                         ),
-                      ),
-                      child: const Text(
-                        'Sign Up',
-                        style: TextStyle(
-                          color: Color(0xFF1A56DB),
+                      ).then((_) {
+                        if (mounted) setState(() {});
+                      }),
+                      child: Text(
+                        _tr.t('login_sign_up'),
+                        style: const TextStyle(
+                          color: AppTheme.primary,
                           fontWeight: FontWeight.bold,
-                          fontSize: 15,
+                          fontSize: AppTheme.fontXS,
                         ),
                       ),
                     ),
@@ -371,34 +441,44 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
+        Positioned(
+          top: 16,
+          right: 16,
+          child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+        ),
+      ],
+    ),
+  ),
+);
   }
 
   InputDecoration _inputDecoration(
       {required String label, required IconData icon}) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: const Color(0xFF9CA3AF)),
+      labelStyle: const TextStyle(
+          color: AppTheme.textMedium, fontSize: AppTheme.fontXS),
+      prefixIcon: Icon(icon, color: AppTheme.textLight, size: 26),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        borderSide: const BorderSide(color: AppTheme.cardBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        borderSide: const BorderSide(color: AppTheme.cardBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF1A56DB), width: 2),
+        borderSide: const BorderSide(color: AppTheme.primary, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFDC2626)),
+        borderSide: const BorderSide(color: AppTheme.danger),
       ),
+      errorStyle: const TextStyle(fontSize: AppTheme.fontXS - 2),
       filled: true,
-      fillColor: const Color(0xFFF9FAFB),
-      labelStyle: const TextStyle(color: Color(0xFF6B7280)),
+      fillColor: AppTheme.background,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 }
@@ -408,8 +488,8 @@ class _GoogleLogo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 24,
-      height: 24,
+      width: 26,
+      height: 26,
       child: CustomPaint(painter: _GoogleLogoPainter()),
     );
   }
@@ -421,12 +501,11 @@ class _GoogleLogoPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
 
-    // Draw coloured arcs (simplified Google G)
     final colors = [
-      const Color(0xFF4285F4), // Blue
-      const Color(0xFF34A853), // Green
-      const Color(0xFFFBBC05), // Yellow
-      const Color(0xFFEA4335), // Red
+      const Color(0xFF4285F4),
+      const Color(0xFF34A853),
+      const Color(0xFFFBBC05),
+      const Color(0xFFEA4335),
     ];
 
     for (int i = 0; i < 4; i++) {

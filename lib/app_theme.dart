@@ -17,12 +17,12 @@ class AppTheme {
   static const Color danger = Color(0xFFCC3333);
   static const Color success = Color(0xFF2D8A4E);
 
-  static const double fontXS = 16.0;
-  static const double fontSM = 20.0;
-  static const double fontMD = 24.0;
-  static const double fontLG = 28.0;
-  static const double fontXL = 34.0;
-  static const double fontXXL = 42.0;
+  static const double fontXS = 18.0;
+  static const double fontSM = 22.0;
+  static const double fontMD = 26.0;
+  static const double fontLG = 32.0;
+  static const double fontXL = 38.0;
+  static const double fontXXL = 46.0;
 
   static ThemeData get theme => ThemeData(
     useMaterial3: true,

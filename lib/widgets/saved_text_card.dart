@@ -61,7 +61,7 @@ class SavedTextCard extends StatelessWidget {
                           Text(
                             savedText.name!,
                             style: const TextStyle(
-                              fontSize: AppTheme.fontSM,
+                              fontSize: AppTheme.fontMD,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.primary,
                             ),
@@ -85,15 +85,15 @@ class SavedTextCard extends StatelessWidget {
                   // Edit name button
                   IconButton(
                     icon: const Icon(Icons.edit_rounded,
-                        color: AppTheme.primary, size: 26),
-                    tooltip: hasName ? 'Edit name' : 'Add name',
+                        color: AppTheme.primary, size: 30),
+                    tooltip: hasName ? tr.t('home_edit_name') : tr.t('home_add_name'),
                     onPressed: onEditName,
                   ),
 
                   // Delete button
                   IconButton(
                     icon: const Icon(Icons.delete_rounded,
-                        color: AppTheme.danger, size: 26),
+                        color: AppTheme.danger, size: 30),
                     tooltip: tr.t('delete'),
                     onPressed: onDelete,
                   ),
@@ -108,11 +108,11 @@ class SavedTextCard extends StatelessWidget {
                 child: Text(
                   displayText.isEmpty ? '—' : displayText,
                   style: const TextStyle(
-                    fontSize: AppTheme.fontSM,
+                    fontSize: AppTheme.fontMD,
                     color: AppTheme.textDark,
                     height: 1.5,
                   ),
-                  maxLines: 3,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -125,12 +125,16 @@ class SavedTextCard extends StatelessWidget {
                   Icon(Icons.arrow_forward_ios_rounded,
                       size: 16, color: AppTheme.primary.withOpacity(0.6)),
                   const SizedBox(width: 4),
-                  Text(
-                    'Tap to read',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontXS,
-                      color: AppTheme.primary.withOpacity(0.7),
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Text(
+                      tr.t('home_tap_to_read'),
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSM,
+                        color: AppTheme.primary.withOpacity(0.7),
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],

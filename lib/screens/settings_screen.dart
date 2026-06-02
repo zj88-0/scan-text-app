@@ -7,6 +7,7 @@ import '../services/translation_service.dart';
 import '../services/wifi_check_service.dart';
 import '../services/auth_service.dart';
 import 'voice_selection_screen.dart';
+import '../main.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -30,30 +31,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.logout_rounded, color: AppTheme.danger, size: 28),
-            SizedBox(width: 10),
-            Text(
-              'Sign Out',
-              style: TextStyle(
-                fontSize: AppTheme.fontMD,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.danger,
+            const Icon(Icons.logout_rounded, color: AppTheme.danger, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _tr.t('settings_sign_out'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.danger,
+                ),
               ),
             ),
           ],
         ),
-        content: const Text(
-          'Are you sure you want to sign out?',
-          style: TextStyle(fontSize: AppTheme.fontSM, height: 1.5),
+        content: Text(
+          _tr.t('settings_sign_out_prompt'),
+          style: const TextStyle(fontSize: AppTheme.fontSM, height: 1.5),
         ),
         actionsPadding: const EdgeInsets.all(16),
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
             style: OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
-            child: const Text('Cancel'),
+            child: Text(_tr.t('settings_cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -61,7 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               backgroundColor: AppTheme.danger,
               minimumSize: const Size(100, 52),
             ),
-            child: const Text('Sign Out'),
+            child: Text(_tr.t('settings_sign_out')),
           ),
         ],
       ),
@@ -81,7 +84,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<String> _activeLanguages = [];
   Map<String, bool> _downloadStatus = {};
   Set<String> _downloading = {};
+  Set<String> _translating = {};
   Set<String> _deleting = {};
+
+  // Whether the initial parallel status check is still running.
+  bool _statusLoading = true;
 
   static const int _maxActive = 4;
   static const int _freeDailyLimit = 3;
@@ -94,12 +101,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _refreshDownloadStatus();
   }
 
+  /// Checks all model download states IN PARALLEL so the settings screen
+  /// is fast even for guest users who have never touched Firestore.
+  ///
+  /// Previously this used a sequential `for` loop which caused every
+  /// ML Kit call to block the next, adding noticeable latency for guests.
   Future<void> _refreshDownloadStatus() async {
-    final status = <String, bool>{};
-    for (final code in _configuredLanguages) {
-      status[code] = await _mlkit.isModelDownloaded(code);
-    }
-    if (mounted) setState(() => _downloadStatus = status);
+    if (!mounted) return;
+    setState(() => _statusLoading = true);
+
+    // Fire all isModelDownloaded calls simultaneously.
+    final codes = List<String>.from(_configuredLanguages);
+    final results = await Future.wait(
+      codes.map((code) async {
+        final downloaded = await _mlkit.isModelDownloaded(code);
+        return MapEntry(code, downloaded);
+      }),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _downloadStatus = Map.fromEntries(results);
+      _statusLoading = false;
+    });
   }
 
   // ── Language model actions ────────────────────────────────────────────────
@@ -110,8 +134,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (isActive) {
       if (_activeLanguages.length <= 1) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('You need at least one active language.'),
+           SnackBar(
+            content: Text(_tr.t('settings_need_one_lang')),
             backgroundColor: AppTheme.danger,
           ),
         );
@@ -140,18 +164,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
         actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        title: const Text(
-          'Maximum 4 Languages',
-          style: TextStyle(
+        title: Text(
+          _tr.t('settings_max_lang'),
+          style: const TextStyle(
             fontSize: AppTheme.fontMD,
             fontWeight: FontWeight.bold,
             color: AppTheme.primary,
           ),
         ),
-        content: const Text(
-          'You can have up to 4 active languages at a time.\n\n'
-              'Please deselect one language before adding another.',
-          style: TextStyle(fontSize: AppTheme.fontSM, height: 1.6),
+        content: Text(
+          _tr.t('settings_max_lang_desc'),
+          style: const TextStyle(fontSize: AppTheme.fontSM, height: 1.6),
         ),
         actions: [
           ElevatedButton(
@@ -159,7 +182,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 56)),
             child:
-            const Text('OK', style: TextStyle(fontSize: AppTheme.fontSM)),
+            Text(_tr.t('settings_ok'), style: const TextStyle(fontSize: AppTheme.fontSM)),
           ),
         ],
       ),
@@ -173,10 +196,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _downloading.add(code));
     await _mlkit.downloadModel(code);
-    final downloaded = await _mlkit.isModelDownloaded(code);
+    
     if (mounted) {
       setState(() {
         _downloading.remove(code);
+        _translating.add(code);
+      });
+    }
+
+    try {
+      await AppTranslations().preTranslate(code);
+    } catch (_) {}
+
+    final downloaded = await _mlkit.isModelDownloaded(code);
+    if (mounted) {
+      setState(() {
+        _translating.remove(code);
         _downloadStatus[code] = downloaded;
       });
     }
@@ -185,8 +220,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _deleteModel(String code) async {
     if (_configuredLanguages.length <= 1) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You need at least one language.'),
+         SnackBar(
+          content: Text(_tr.t('settings_need_one_lang')),
           backgroundColor: AppTheme.danger,
         ),
       );
@@ -198,14 +233,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Remove Language',
-          style: TextStyle(
+        title: Text(
+          _tr.t('settings_remove_lang'),
+          style: const TextStyle(
               fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Remove ${_mlkit.displayName(code)} from your language list and '
-              'delete its translation model from this device?',
+          _tr.t('settings_remove_lang_desc'),
           style: const TextStyle(fontSize: AppTheme.fontSM, height: 1.5),
         ),
         actionsPadding: const EdgeInsets.all(16),
@@ -214,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(ctx, false),
             style: OutlinedButton.styleFrom(
                 minimumSize: const Size(100, 52)),
-            child: const Text('Cancel'),
+            child: Text(_tr.t('settings_cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -222,7 +256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               backgroundColor: AppTheme.danger,
               minimumSize: const Size(100, 52),
             ),
-            child: const Text('Remove'),
+            child: Text(_tr.t('settings_remove')),
           ),
         ],
       ),
@@ -232,6 +266,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _deleting.add(code));
     await _mlkit.deleteModel(code);
+    // Also wipe the cached translated-JSON so a future re-download regenerates
+    // it with the latest translation logic instead of serving the stale file.
+    await AppTranslations().clearCache(code);
 
     final newConfigured =
     _configuredLanguages.where((c) => c != code).toList();
@@ -293,20 +330,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tr.t('settings')),
+        title: Text(_tr.t('settings'), maxLines: 1, overflow: TextOverflow.ellipsis),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded, size: 30),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
+      body: _statusLoading
+          ? _buildStatusLoading()
+          : SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Voice Settings ────────────────────────────────────────────
+            // ── Voice Settings ──────────────────────────────────────
             _sectionTitle(
-                Icons.record_voice_over_rounded, _tr.t('voice_settings')),
+                Icons.record_voice_over_rounded,
+                _tr.t('voice_settings')),
             const SizedBox(height: 12),
             _buildVoiceSettingsCard(),
 
@@ -314,8 +354,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Daily Scans ───────────────────────────────────────────────
-            _sectionTitle(Icons.document_scanner_rounded, 'Daily Scans'),
+            // ── Daily Scans ─────────────────────────────────────────
+            _sectionTitle(
+                Icons.document_scanner_rounded, _tr.t('settings_daily_scans')),
             const SizedBox(height: 12),
             _buildDailyScansCard(),
 
@@ -323,18 +364,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Translation Languages ─────────────────────────────────────
+            // ── Translation Languages ───────────────────────────────
             _sectionTitle(
-                Icons.translate_rounded, 'Translation Languages'),
+                Icons.translate_rounded, _tr.t('settings_translation_languages')),
             const SizedBox(height: 8),
             Container(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: AppTheme.accent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: AppTheme.accent.withOpacity(0.3), width: 1.5),
+                    color: AppTheme.accent.withOpacity(0.3),
+                    width: 1.5),
               ),
               child: Row(
                 children: [
@@ -343,8 +385,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Select up to $_maxActive languages to show in the app. '
-                          'Models are stored on your device.',
+                      _tr.t('settings_lang_desc'),
                       style: const TextStyle(
                         fontSize: AppTheme.fontXS,
                         color: AppTheme.textMedium,
@@ -359,8 +400,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: _activeLanguages.length >= _maxActive
                       ? AppTheme.accent.withOpacity(0.15)
@@ -368,7 +409,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${_activeLanguages.length} / $_maxActive active',
+                  '${_activeLanguages.length} / $_maxActive ${_tr.t("settings_active")}',
                   style: TextStyle(
                     fontSize: AppTheme.fontXS,
                     fontWeight: FontWeight.bold,
@@ -381,7 +422,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 10),
 
-            ..._configuredLanguages.map((code) => _buildLanguageCard(code)),
+            ..._configuredLanguages
+                .map((code) => _buildLanguageCard(code)),
 
             const SizedBox(height: 12),
             _buildAddLanguageRow(),
@@ -390,14 +432,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(),
             const SizedBox(height: 24),
 
-            // ── Account ───────────────────────────────────────────────────
-            _sectionTitle(Icons.account_circle_rounded, 'Account'),
+            // ── Account ─────────────────────────────────────────────
+            _sectionTitle(
+                Icons.account_circle_rounded, _tr.t('settings_account')),
             const SizedBox(height: 12),
             _buildLogoutButton(),
 
             const SizedBox(height: 40),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Lightweight loading indicator shown only while the parallel model-status
+  /// check is in flight (typically < 300 ms, even for guests).
+  Widget _buildStatusLoading() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children:  [
+          CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
+          SizedBox(height: 20),
+          Text(
+            _tr.t('settings_loading'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontSM,
+              color: AppTheme.textMedium,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -436,13 +500,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       color: AppTheme.accent, size: 28),
                 ),
                 const SizedBox(width: 16),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Unlimited Scans',
-                        style: TextStyle(
+                        _tr.t('settings_unlimited'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
                           fontSize: AppTheme.fontMD,
                           fontWeight: FontWeight.bold,
                           color: AppTheme.accent,
@@ -450,8 +516,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Premium plan — no daily limit',
-                        style: TextStyle(
+                        _tr.t('settings_premium_plan'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
                           fontSize: AppTheme.fontXS,
                           color: AppTheme.textMedium,
                         ),
@@ -462,7 +530,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ] else ...[
-            // Free — show usage bar
+            // Free / Guest — show usage bar
             Row(
               children: [
                 Container(
@@ -476,7 +544,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   child: Icon(
                     Icons.document_scanner_rounded,
-                    color: remaining == 0 ? AppTheme.danger : AppTheme.primary,
+                    color:
+                    remaining == 0 ? AppTheme.danger : AppTheme.primary,
                     size: 26,
                   ),
                 ),
@@ -486,7 +555,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '$remaining of $limit scans left today',
+                        '$remaining ${_tr.t("home_of")} $limit ${_tr.t("home_scans_left")}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: AppTheme.fontMD,
                           fontWeight: FontWeight.bold,
@@ -497,7 +568,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Resets at midnight • Free plan',
+                        _tr.t('settings_free_plan_reset'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: AppTheme.fontXS,
                           color: AppTheme.textLight,
@@ -528,19 +601,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '$usedToday used',
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontXS,
-                    color: AppTheme.textMedium,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Text(
+                    '$usedToday ${_tr.t("settings_used")}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontXS,
+                      color: AppTheme.textMedium,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                Text(
-                  '$limit total',
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontXS,
-                    color: AppTheme.textLight,
+                Flexible(
+                  child: Text(
+                    '$limit ${_tr.t("settings_total")}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontXS,
+                      color: AppTheme.textLight,
+                    ),
                   ),
                 ),
               ],
@@ -554,9 +635,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── Voice settings card ───────────────────────────────────────────────────
 
   Widget _buildVoiceSettingsCard() {
-    final voiceName = _dataService.getPreferredVoiceName();
+    final voiceName   = _dataService.getPreferredVoiceName();
     final voiceLocale = _dataService.getPreferredVoiceLocale();
-    final hasVoice = voiceName != null;
+    final hasVoice    = voiceName != null;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -584,7 +665,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Text(
                   hasVoice
-                      ? _friendlyName(voiceName!)
+                      ? _friendlyName(voiceLocale)
                       : _tr.t('voice_default'),
                   style: const TextStyle(
                     fontSize: AppTheme.fontSM,
@@ -629,13 +710,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _friendlyName(String raw) {
-    return raw
-        .replaceAll('-', ' ')
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
-        .join(' ');
+  String _friendlyName(String? locale) {
+    if (locale == null || locale.isEmpty) return _tr.t('voice_default');
+    
+    final parts = locale.split(RegExp(r'[-_]'));
+    if (parts.length > 1) {
+      String region = parts[1];
+      for (int i = 1; i < parts.length; i++) {
+        if (parts[i].length == 2) {
+          region = parts[i];
+          break;
+        }
+      }
+      region = region.toUpperCase();
+      if (region == 'GB') region = 'UK';
+      return '$region ${_tr.t('voice_number')}';
+    }
+    return '${parts.first.toUpperCase()} ${_tr.t('voice_number')}';
   }
 
   // ── Shared widgets ────────────────────────────────────────────────────────
@@ -645,12 +736,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Icon(icon, color: AppTheme.primary, size: 26),
         const SizedBox(width: 10),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: AppTheme.fontMD,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.primary,
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: AppTheme.fontMD,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.primary,
+            ),
           ),
         ),
       ],
@@ -658,16 +753,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildLanguageCard(String code) {
-    final name = _mlkit.displayName(code);
-    final isDownloaded = _downloadStatus[code] ?? false;
+    final name          = _mlkit.displayName(code);
+    final isDownloaded  = _downloadStatus[code] ?? false;
     final isDownloading = _downloading.contains(code);
-    final isDeleting = _deleting.contains(code);
+    final isTranslating = _translating.contains(code);
+    final isDeleting    = _deleting.contains(code);
     final isDefault =
     OnDeviceTranslationService.defaultLanguageCodes.contains(code);
-    final isActive = _activeLanguages.contains(code);
-    final atCap = _activeLanguages.length >= _maxActive;
-    final everHad = _mlkit.wasEverDownloaded(code);
-    final wasDeletedByUser = everHad && !isDownloaded && !isDownloading;
+    final isActive          = _activeLanguages.contains(code);
+    final atCap             = _activeLanguages.length >= _maxActive;
+    final everHad           = _mlkit.wasEverDownloaded(code);
+    final wasDeletedByUser  = everHad && !isDownloaded && !isDownloading;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -716,30 +812,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: AppTheme.textDark,
                           ),
                         ),
-                        if (isDefault) _badge('Default', AppTheme.accent),
-                        if (isActive) _badge('Active', AppTheme.success),
+                        if (isDefault) _badge(_tr.t('voice_default'), AppTheme.accent),
+                        if (isActive)  _badge(_tr.t('settings_active'), AppTheme.success),
                         if (wasDeletedByUser)
-                          _badge('Removed', AppTheme.danger),
+                          _badge(_tr.t('settings_removed'), AppTheme.danger),
                       ],
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      isDownloaded
-                          ? 'Model ready — on this device'
-                          : isDownloading
-                          ? 'Downloading…'
-                          : wasDeletedByUser
-                          ? 'Removed — tap Download to restore'
-                          : 'Not yet downloaded',
+                      isTranslating
+                          ? _tr.t('setup_setting_up')
+                          : isDownloaded
+                              ? _tr.t('settings_model_ready')
+                              : isDownloading
+                                  ? _tr.t('settings_downloading')
+                                  : wasDeletedByUser
+                                      ? _tr.t('settings_removed_restore')
+                                      : _tr.t('settings_not_downloaded'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: AppTheme.fontXS,
-                        color: isDownloaded
-                            ? AppTheme.success
-                            : isDownloading
+                        color: isTranslating || isDownloading
                             ? AppTheme.accent
-                            : wasDeletedByUser
-                            ? AppTheme.danger
-                            : AppTheme.textLight,
+                            : isDownloaded
+                                ? AppTheme.success
+                                : wasDeletedByUser
+                                    ? AppTheme.danger
+                                    : AppTheme.textLight,
                       ),
                     ),
                   ],
@@ -748,7 +848,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          if (isDownloading || isDeleting)
+          if (isDownloading || isTranslating || isDeleting)
             const Center(
               child: SizedBox(
                 width: 32,
@@ -797,16 +897,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 : AppTheme.textLight),
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            isActive ? 'Selected' : 'Select',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontXS,
-                              fontWeight: FontWeight.bold,
-                              color: isActive
-                                  ? Colors.white
-                                  : (!atCap
-                                  ? AppTheme.primary
-                                  : AppTheme.textLight),
+                          Flexible(
+                            child: Text(
+                              isActive ? _tr.t('settings_selected') : _tr.t('settings_select'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppTheme.fontXS,
+                                fontWeight: FontWeight.bold,
+                                color: isActive
+                                    ? Colors.white
+                                    : (!atCap
+                                    ? AppTheme.primary
+                                    : AppTheme.textLight),
+                              ),
                             ),
                           ),
                         ],
@@ -827,18 +931,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           border: Border.all(
                               color: AppTheme.accent, width: 1.5),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(Icons.download_rounded,
                                 color: AppTheme.accent, size: 22),
                             SizedBox(width: 6),
-                            Text(
-                              'Download',
-                              style: TextStyle(
-                                fontSize: AppTheme.fontXS,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.accent,
+                            Flexible(
+                              child: Text(
+                                _tr.t('settings_download'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: AppTheme.fontXS,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.accent,
+                                ),
                               ),
                             ),
                           ],
@@ -858,18 +966,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           border: Border.all(
                               color: AppTheme.danger, width: 1.5),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(Icons.delete_rounded,
                                 color: AppTheme.danger, size: 22),
                             SizedBox(width: 6),
-                            Text(
-                              'Remove',
-                              style: TextStyle(
-                                fontSize: AppTheme.fontXS,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.danger,
+                            Flexible(
+                              child: Text(
+                                _tr.t('settings_remove'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: AppTheme.fontXS,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.danger,
+                                ),
                               ),
                             ),
                           ],
@@ -894,7 +1006,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: AppTheme.fontXS,
           color: color,
           fontWeight: FontWeight.w600,
         ),
@@ -907,10 +1019,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: _logout,
-        icon: const Icon(Icons.logout_rounded, color: AppTheme.danger, size: 24),
-        label: const Text(
-          'Sign Out',
-          style: TextStyle(
+        icon:
+        const Icon(Icons.logout_rounded, color: AppTheme.danger, size: 24),
+        label: Text(
+          _tr.t('settings_sign_out'),
+          style: const TextStyle(
             fontSize: AppTheme.fontSM,
             fontWeight: FontWeight.bold,
             color: AppTheme.danger,
@@ -950,9 +1063,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: null,
-                hint: const Text(
-                  'Add a language…',
-                  style: TextStyle(
+                hint: Text(
+                  _tr.t('settings_add_lang_hint'),
+                  style: const TextStyle(
                     fontSize: AppTheme.fontSM,
                     color: AppTheme.textLight,
                   ),

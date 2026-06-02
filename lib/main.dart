@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
@@ -15,6 +16,7 @@ import 'services/tts_service.dart';
 import 'services/wifi_check_service.dart';
 import 'services/auth_service.dart';
 import 'screens/login_screen.dart';
+import 'widgets/global_language_icon.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -67,7 +69,14 @@ class _ElderlyReaderAppState extends State<ElderlyReaderApp> {
 // guarantees sign-out always returns to LoginScreen cleanly.
 // ════════════════════════════════════════════════════════════════════════════
 
-enum _Screen { loading, signedOut, awaitingVerification, modelSetup, onboarding, home }
+enum _Screen {
+  loading,
+  signedOut,
+  awaitingVerification,
+  modelSetup,
+  onboarding,
+  home
+}
 
 class AppRoot extends StatefulWidget {
   final VoidCallback onLanguageChanged;
@@ -87,42 +96,79 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool _downloading = false;
   bool _done = false;
   bool _waitingForWifi = false;
-  String _statusText = 'Checking language models…';
+  String _statusText = '';
+  String _statusKey = '';
   int _current = 0;
   int _total = 0;
   bool _modelSetupStarted = false;
+  Set<String> _completedModels = {};
+  bool _pausedForWifi = false;
+  List<String> _missingCodes = [];
+  int _downloadSessionId = 0;
+  bool _startedOnMobile = false;
+
+  bool _guestSeenOnboarding = false;
 
   // Email-verification polling
   Timer? _verificationTimer;
   StreamSubscription<User?>? _tokenSub;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     FirebaseAuth.instance.userChanges().listen(_onAuthChanged);
+
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((results) async {
+      if (!mounted) return;
+      final hasWifi = results.contains(ConnectivityResult.wifi) ||
+          results.contains(ConnectivityResult.ethernet) ||
+          results.contains(ConnectivityResult.vpn);
+
+      if (hasWifi && _screen == _Screen.modelSetup) {
+        if (_pausedForWifi) {
+          setState(() => _pausedForWifi = false);
+          _checkModels();
+        } else if (_downloading &&
+            _missingCodes.isNotEmpty &&
+            _startedOnMobile) {
+          _startedOnMobile = false; // Prevent multiple restart loops
+          // Pause and redownload on Wi-Fi for faster speeds
+          setState(() {
+            _statusKey = 'setup_switching_wifi';
+          });
+
+          await Future.wait(_missingCodes.map((code) async {
+            if (!_completedModels.contains(code)) {
+              await _mlkit.deleteModel(code);
+            }
+          }));
+
+          if (!mounted) return;
+          _checkModels();
+        }
+      }
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
         _screen == _Screen.awaitingVerification) {
-      _checkVerificationNow(); // fire and forget — result handled inside
+      _checkVerificationNow();
     }
   }
 
-  /// One-shot check: reloads the Firebase user and advances if verified.
-  /// Returns true if the user was verified (and navigation was triggered),
-  /// false if not verified yet.
   Future<bool> _checkVerificationNow() async {
     final verified = await AuthService().reloadAndCheckVerified();
-    if (!mounted) return true; // widget gone, treat as navigated
+    if (!mounted) return true;
     if (verified) {
       _verificationTimer?.cancel();
       _verificationTimer = null;
       _tokenSub?.cancel();
       _tokenSub = null;
-      // Re-read currentUser AFTER reload so emailVerified is fresh.
       final freshUser = FirebaseAuth.instance.currentUser;
       _onAuthChanged(freshUser);
       return true;
@@ -133,7 +179,6 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   void _onAuthChanged(User? user) {
     if (!mounted) return;
     if (user == null) {
-      // Signed out — cancel any verification polling and reset to login
       _verificationTimer?.cancel();
       _verificationTimer = null;
       _tokenSub?.cancel();
@@ -145,26 +190,25 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         _downloading = false;
         _done = false;
         _waitingForWifi = false;
-        _statusText = 'Checking language models…';
+        _pausedForWifi = false;
+        _statusText = AppTranslations().t('setup_checking_models');
         _current = 0;
         _total = 0;
       });
     } else {
-      // Google users are always considered verified.
+      // Anonymous users skip email verification entirely.
+      final isAnonymous = user.isAnonymous;
+
       // Email/password users must verify before proceeding.
-      final isEmailProvider = user.providerData
-          .any((p) => p.providerId == 'password');
-      if (isEmailProvider && !user.emailVerified) {
+      final isEmailProvider =
+          user.providerData.any((p) => p.providerId == 'password');
+      if (!isAnonymous && isEmailProvider && !user.emailVerified) {
         setState(() => _screen = _Screen.awaitingVerification);
         _startVerificationPolling();
         return;
       }
       _verificationTimer?.cancel();
       _verificationTimer = null;
-      // Guard: don't regress once we are past model setup.
-      // userChanges() / idTokenChanges() can re-fire on token refresh,
-      // and we must not restart the model check or overwrite the
-      // onboarding / home screen that is already showing.
       if (_screen == _Screen.home ||
           _screen == _Screen.onboarding ||
           _screen == _Screen.modelSetup) return;
@@ -180,16 +224,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     _verificationTimer?.cancel();
     _tokenSub?.cancel();
 
-    // idTokenChanges fires the moment Firebase pushes a refreshed token —
-    // which happens as soon as the backend marks the email verified.
-    // This is the fast path: often arrives within a second of the user
-    // clicking the link, with no reload() call needed.
     _tokenSub = FirebaseAuth.instance.idTokenChanges().listen((user) {
       if (user != null && user.emailVerified) _checkVerificationNow();
     });
 
-    // Fallback poll every 2 s: reloads the user record in case the push
-    // stream is unavailable (poor connectivity, etc.).
     _verificationTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_screen == _Screen.awaitingVerification) _checkVerificationNow();
     });
@@ -200,12 +238,15 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _verificationTimer?.cancel();
     _tokenSub?.cancel();
+    _connectivitySub?.cancel();
     super.dispose();
   }
 
   Future<void> _checkModels() async {
-    // Parallel check — all 4 isModelDownloaded calls fire simultaneously
-    // instead of one-by-one, saving ~2-4 seconds on slow devices.
+    _downloadSessionId++;
+    final int currentSession = _downloadSessionId;
+    if (mounted) setState(() => _statusKey = 'setup_checking_models');
+
     final checks = await Future.wait(
       OnDeviceTranslationService.defaultLanguageCodes.map((code) async {
         final onDisk = await _mlkit.isModelDownloaded(code);
@@ -214,8 +255,9 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       }),
     );
     final missingCodes = checks.whereType<String>().toList();
+    _missingCodes = missingCodes;
 
-    if (!mounted) return;
+    if (!mounted || currentSession != _downloadSessionId) return;
 
     if (missingCodes.isEmpty) {
       _goNext();
@@ -225,69 +267,88 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     setState(() {
       _checking = false;
       _waitingForWifi = true;
-      _statusText = 'Checking your connection…';
+      _statusKey = 'setup_checking_conn';
     });
 
-    if (!mounted) return;
+    if (!mounted || currentSession != _downloadSessionId) return;
     final proceed = await WiFiCheckService().checkAndConfirm(context);
-    if (!mounted) return;
+    if (!mounted || currentSession != _downloadSessionId) return;
 
     if (!proceed) {
       setState(() {
         _waitingForWifi = false;
+        _pausedForWifi = true;
         _checking = true;
-        _statusText = 'Connect to Wi-Fi and reopen the app to continue.';
+        _statusKey = 'setup_waiting_wifi';
       });
       return;
     }
+
+    final netResults = await Connectivity().checkConnectivity();
+    final isWifiNow = netResults.contains(ConnectivityResult.wifi) ||
+        netResults.contains(ConnectivityResult.ethernet) ||
+        netResults.contains(ConnectivityResult.vpn);
+    _startedOnMobile = !isWifiNow;
 
     setState(() {
       _waitingForWifi = false;
       _downloading = true;
       _total = missingCodes.length;
-      _statusText = 'Setting up translation…';
+      _current = 0;
+      _statusKey = 'setup_downloading';
+      _completedModels = OnDeviceTranslationService.defaultLanguageCodes
+          .where((c) => !missingCodes.contains(c))
+          .toSet();
     });
 
-    // Pass the already-computed missing list so ensureDefaultModels skips
-    // its own redundant sequential isModelDownloaded loop.
     await _mlkit.ensureDefaultModels(
       alreadyMissing: missingCodes,
       onProgress: (code, current, total) {
-        if (!mounted) return;
+        if (!mounted || currentSession != _downloadSessionId) return;
         setState(() {
           _current = current;
           _total = total;
+          _completedModels.add(code);
+          _statusKey = '';
           _statusText =
-          'Downloading ${_mlkit.displayName(code)} ($current of $total)…';
+              '${AppTranslations().t('setup_downloaded')} ${_mlkit.displayName(code)} ($current ${AppTranslations().t('setup_of')} $total)…';
         });
       },
     );
 
-    if (!mounted) return;
+    if (!mounted || currentSession != _downloadSessionId) return;
     setState(() {
       _done = true;
-      _statusText = 'All set! Starting app…';
+      _statusText = AppTranslations().t('setup_all_set');
     });
 
     await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) _goNext();
+    if (mounted && currentSession == _downloadSessionId) _goNext();
   }
 
   Future<void> _goNext() async {
-    // Run both Firestore calls in parallel instead of sequentially.
+    final user = FirebaseAuth.instance.currentUser;
+    final isGuest = user?.isAnonymous ?? false;
+
     bool seenOnboarding = false;
     try {
-      final results = await Future.wait([
-        AuthService().ensureUserDocument(),
-        AuthService().hasSeenOnboarding(),
-      ]);
-      seenOnboarding = results[1] as bool;
+      if (!isGuest) {
+        // Full user: run Firestore setup in parallel
+        final results = await Future.wait([
+          AuthService().ensureUserDocument(),
+          AuthService().hasSeenOnboarding(),
+        ]);
+        seenOnboarding = results[1] as bool;
+        // Fire-and-forget scan count sync for logged-in users
+        DataService().syncScanCountFromRemote().catchError((_) {});
+      } else {
+        // Guest: no Firestore writes, scan count tracked locally only.
+        // Show onboarding (terms) for guests too.
+        seenOnboarding = _guestSeenOnboarding;
+      }
     } catch (e) {
       debugPrint('[AppRoot] _goNext setup failed: $e');
     }
-
-    // Fire-and-forget — does not block navigation.
-    DataService().syncScanCountFromRemote().catchError((_) {});
 
     if (!mounted) return;
     if (!seenOnboarding) {
@@ -297,12 +358,18 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     }
   }
 
-  /// Called by OnboardingScreen when the user taps 'Got It'.
+  /// Called by OnboardingScreen when the user taps 'Acknowledge'.
   Future<void> _onOnboardingDone() async {
-    try {
-      await AuthService().markOnboardingSeen();
-    } catch (e) {
-      debugPrint('[AppRoot] markOnboardingSeen failed: $e');
+    final isGuest = FirebaseAuth.instance.currentUser?.isAnonymous ?? false;
+    if (!isGuest) {
+      // Only persist to Firestore for real accounts
+      try {
+        await AuthService().markOnboardingSeen();
+      } catch (e) {
+        debugPrint('[AppRoot] markOnboardingSeen failed: $e');
+      }
+    } else {
+      _guestSeenOnboarding = true;
     }
     if (!mounted) return;
     setState(() => _screen = _Screen.home);
@@ -342,138 +409,142 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   }
 
   Widget _buildModelSetup() {
+    final _tr = AppTranslations();
+    
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(40),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(24),
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/img/VisionAID_logo.png',
+                  width: 220,
                 ),
-                child: const Icon(
-                  Icons.translate_rounded,
-                  color: Colors.white,
-                  size: 56,
-                ),
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                'Text Scanner',
-                style: TextStyle(
-                  fontSize: AppTheme.fontXL,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (_checking)
-                Text(
-                  _statusText,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.textMedium,
-                    height: 1.5,
+                if (_checking)
+                  Text(
+                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.textMedium,
+                      height: 1.5,
+                    ),
                   ),
-                ),
-              if (_waitingForWifi)
-                const Text(
-                  'Checking your connection…',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.textMedium,
+                if (_waitingForWifi)
+                  Text(
+                    _tr.t('setup_checking_conn'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.textMedium,
+                    ),
                   ),
-                ),
-              if (_downloading || _done) ...[
-                const SizedBox(height: 6),
-                const Text(
-                  'Downloading translation models.\nThis only happens once.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.textMedium,
-                    height: 1.5,
+                if (_downloading || _done) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _tr.t('setup_downloading'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.textMedium,
+                      height: 1.5,
+                    ),
                   ),
-                ),
+                ],
+                const SizedBox(height: 40),
+                if (_checking || _downloading) ...[
+                  LinearProgressIndicator(
+                    value: _total > 0 ? _current / _total : null,
+                    backgroundColor: AppTheme.cardBorder,
+                    color: AppTheme.accent,
+                    minHeight: 10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                if (_done) ...[
+                  const Icon(Icons.check_circle_rounded,
+                      color: AppTheme.success, size: 56),
+                  const SizedBox(height: 16),
+                  Text(
+                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.success,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 48),
+                if (_downloading || _done)
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.center,
+                    children: OnDeviceTranslationService.defaultLanguageCodes
+                        .map((code) {
+                      final name = AppTranslations.languageNames[code] ?? _mlkit.displayName(code);
+                      final isDone = _done || _completedModels.contains(code);
+                      return Chip(
+                        avatar: isDone
+                            ? const Icon(Icons.check_circle_rounded,
+                                size: 18, color: AppTheme.success)
+                            : const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: AppTheme.primary),
+                              ),
+                        label: Text(name,
+                            style: TextStyle(
+                                fontSize: AppTheme.fontXS,
+                                color: isDone
+                                    ? AppTheme.success
+                                    : AppTheme.primary)),
+                        backgroundColor: AppTheme.surface,
+                        side: BorderSide(
+                            color: isDone
+                                ? AppTheme.success
+                                : AppTheme.cardBorder),
+                      );
+                    }).toList(),
+                  ),
               ],
-              const SizedBox(height: 40),
-              if (_checking || _downloading) ...[
-                LinearProgressIndicator(
-                  value: (_total > 0 && _current > 0)
-                      ? _current / _total
-                      : null,
-                  backgroundColor: AppTheme.cardBorder,
-                  color: AppTheme.accent,
-                  minHeight: 10,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  _statusText,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              if (_done) ...[
-                const Icon(Icons.check_circle_rounded,
-                    color: AppTheme.success, size: 56),
-                const SizedBox(height: 16),
-                Text(
-                  _statusText,
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.success,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 48),
-              if (_downloading || _done)
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  alignment: WrapAlignment.center,
-                  children: OnDeviceTranslationService.defaultLanguageCodes
-                      .map((code) {
-                    final name = _mlkit.displayName(code);
-                    return Chip(
-                      avatar: const Icon(Icons.language_rounded,
-                          size: 18, color: AppTheme.primary),
-                      label: Text(name,
-                          style: const TextStyle(
-                              fontSize: 16, color: AppTheme.primary)),
-                      backgroundColor: AppTheme.surface,
-                      side: const BorderSide(color: AppTheme.cardBorder),
-                    );
-                  }).toList(),
-                ),
-            ],
+            ),
           ),
         ),
-      ),
-    );
+        Positioned(
+          top: 16,
+          right: 16,
+          child: GlobalLanguageIcon(fastLoad: true, onChanged: () => setState(() {})),
+        ),
+      ],
+    ),
+  ),
+);
   }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Verification waiting screen — shown after sign-up until email is confirmed.
-// Auto-advance is handled by AppRoot (lifecycle observer + 4s poll).
-// The "I've Verified" button is a manual fallback.
+// Verification waiting screen
 // ════════════════════════════════════════════════════════════════════════════
 class _VerificationWaitingScreen extends StatefulWidget {
-  final Future<bool> Function() onCheckNow; // true = verified+navigated
+  final Future<bool> Function() onCheckNow;
   final Future<void> Function() onResend;
   final Future<void> Function() onSignOut;
 
@@ -501,12 +572,8 @@ class _VerificationWaitingScreenState
     });
 
     final navigated = await widget.onCheckNow();
-
-    // If navigated == true, AppRoot has already swapped screens.
-    // Don't touch state — this widget is about to be replaced.
     if (navigated) return;
 
-    // Still not verified — show the amber nudge.
     if (mounted) {
       setState(() {
         _checking = false;
@@ -522,8 +589,8 @@ class _VerificationWaitingScreenState
     await widget.onResend();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Verification email resent.'),
+      SnackBar(
+        content: Text(AppTranslations().t('verify_msg_resent')),
         backgroundColor: Colors.green,
       ),
     );
@@ -531,18 +598,19 @@ class _VerificationWaitingScreenState
 
   @override
   Widget build(BuildContext context) {
-    final email =
-        FirebaseAuth.instance.currentUser?.email ?? 'your email';
+    final email = FirebaseAuth.instance.currentUser?.email ?? 'your email';
+    final _tr = AppTranslations();
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // ── Icon ─────────────────────────────────────────────────────
               Container(
                 width: 100,
                 height: 100,
@@ -556,20 +624,18 @@ class _VerificationWaitingScreenState
                   size: 56,
                 ),
               ),
-              const SizedBox(height: 32),
-
-              const Text(
-                'Verify Your Email',
-                style: TextStyle(
-                  fontSize: AppTheme.fontXL,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primary,
+                const SizedBox(height: 32),
+                Text(
+                  _tr.t('verify_title'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontXL,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 12),
               Text(
-                'We sent a verification link to\n$email\n\n'
-                    'Open the link in that email, then tap the button below.',
+                '${_tr.t('verify_desc_1')}\n$email\n\n${_tr.t('verify_desc_2')}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: AppTheme.fontSM,
@@ -578,47 +644,43 @@ class _VerificationWaitingScreenState
                 ),
               ),
               const SizedBox(height: 36),
-
-              // ── Auto-polling indicator ────────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
+                children: [
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: AppTheme.accent,
                     ),
                   ),
-                  SizedBox(width: 10),
-                  Text(
-                    'Checking automatically…',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.textMedium,
+                  const SizedBox(width: 10),
+                    Text(
+                      _tr.t('verify_checking'),
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontSM,
+                        color: AppTheme.textMedium,
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
               const SizedBox(height: 32),
-
-              // ── "I've Verified" proceed button ────────────────────────────
               SizedBox(
                 width: double.infinity,
-                height: 56,
+                height: 64,
                 child: ElevatedButton.icon(
                   onPressed: _checking ? null : _handleProceed,
                   icon: _checking
                       ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2.5),
-                  )
-                      : const Icon(Icons.check_circle_rounded),
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5),
+                        )
+                      : const Icon(Icons.check_circle_rounded, size: 26),
                   label: Text(
-                    _checking ? 'Checking…' : "I've Verified — Continue",
+                    _checking ? _tr.t('verify_btn_check') : _tr.t('verify_btn_continue'),
                     style: const TextStyle(
                       fontSize: AppTheme.fontSM,
                       fontWeight: FontWeight.bold,
@@ -634,50 +696,48 @@ class _VerificationWaitingScreenState
                   ),
                 ),
               ),
-
-              // ── "Not verified yet" nudge ──────────────────────────────────
               AnimatedSize(
                 duration: const Duration(milliseconds: 250),
                 child: _notVerifiedYet
                     ? Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.info_outline_rounded,
-                            color: Color(0xFFD97706), size: 20),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Email not verified yet. Please click the link in your inbox first.',
-                            style: TextStyle(
-                              color: Color(0xFFD97706),
-                              fontSize: 13,
-                            ),
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline_rounded,
+                                  color: Color(0xFFD97706), size: 22),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _tr.t('verify_err_not_yet'),
+                                  style: const TextStyle(
+                                    color: Color(0xFFD97706),
+                                    fontSize: AppTheme.fontXS,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                )
+                      )
                     : const SizedBox.shrink(),
               ),
-
               const SizedBox(height: 20),
-
-              // ── Resend button ─────────────────────────────────────────────
               OutlinedButton.icon(
                 onPressed: _checking ? null : _handleResend,
-                icon: const Icon(Icons.send_rounded),
-                label: const Text('Resend Email'),
+                icon: const Icon(Icons.send_rounded, size: 24),
+                label: Text(_tr.t('verify_resend'),
+                    style: const TextStyle(
+                        fontSize: AppTheme.fontSM,
+                        fontWeight: FontWeight.w600)),
                 style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 52),
+                  minimumSize: const Size(double.infinity, 60),
                   side: const BorderSide(color: AppTheme.primary, width: 1.5),
                   foregroundColor: AppTheme.primary,
                   shape: RoundedRectangleBorder(
@@ -686,20 +746,26 @@ class _VerificationWaitingScreenState
                 ),
               ),
               const SizedBox(height: 16),
-
-              // ── Sign out link ─────────────────────────────────────────────
               TextButton(
                 onPressed: _checking ? null : widget.onSignOut,
-                child: const Text(
-                  'Use a different account',
-                  style: TextStyle(color: AppTheme.textMedium),
+                child: Text(
+                  _tr.t('verify_diff_account'),
+                  style: const TextStyle(
+                      color: AppTheme.textMedium, fontSize: AppTheme.fontXS),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
+        Positioned(
+          top: 16,
+          right: 16,
+          child: GlobalLanguageIcon(fastLoad: true, onChanged: () => setState(() {})),
+        ),
+      ],
+    ),
+  ),
+);
   }
 }
 
@@ -708,10 +774,34 @@ class _SplashLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: GlobalLanguageIcon(fastLoad: true, onChanged: () {
+              // We do nothing on change since splash only shows logo,
+              // but we need the icon visible
+            }),
+          ),
+        ],
+      ),
       body: Center(
-        child: CircularProgressIndicator(color: AppTheme.accent),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/img/VisionAID_logo.png',
+              width: 220,
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(color: AppTheme.accent),
+          ],
+        ),
       ),
     );
   }

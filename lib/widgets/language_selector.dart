@@ -57,7 +57,7 @@ class LanguageSelector extends StatelessWidget {
                     color: isSelected
                         ? Colors.white
                         : Colors.white.withOpacity(0.9),
-                    fontSize: 15,
+                    fontSize: AppTheme.fontSM,
                     fontWeight:
                         isSelected ? FontWeight.bold : FontWeight.normal,
                   ),

@@ -23,7 +23,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Upgrade Plan'),
+        title: Text(_tr.t('upgrade_title'), maxLines: 1, overflow: TextOverflow.ellipsis),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded, size: 30),
           onPressed: () => Navigator.pop(context),
@@ -34,46 +34,21 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Info banner ───────────────────────────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: AppTheme.primary.withOpacity(0.2), width: 1.5),
-              ),
-              child: const Text(
-                'Choose how the app translates your scanned text.\n\n'
-                '• Free  — translations happen immediately using system models. '
-                'Fast and works without internet after the first setup. '
-                'Limited to 3 scans per day.\n\n'
-                '• Premium  — translations are done by AI and are natural '
-                'and context-aware. Only the language you select is translated. '
-                'Results are cached locally, translated once per scan. Unlimited scans.',
-                style: TextStyle(
-                  fontSize: AppTheme.fontXS,
-                  color: AppTheme.textMedium,
-                  height: 1.6,
-                ),
-              ),
-            ),
 
-            const SizedBox(height: 24),
 
-            // ── Free tier card ────────────────────────────────────────────
+            // ── Standard tier card ────────────────────────────────────────────
             _buildTierCard(
               isSelected: !isPremium,
               icon: Icons.phone_android_rounded,
               iconColor: AppTheme.primary,
-              title: 'Free',
-              subtitle: 'On-device translation · Works offline',
-              features: const [
-                'Instant translation for all languages',
-                'Direct word-for-word translation',
-                '3 scans per day',
+              title: _tr.t('upgrade_standard'),
+              subtitle: _tr.t('upgrade_standard_sub'),
+              features: [
+                _tr.t('upgrade_std_feat_1'),
+                _tr.t('upgrade_std_feat_2'),
+                _tr.t('upgrade_std_feat_3'),
               ],
-              badgeLabel: 'Current Plan',
+              badgeLabel: _tr.t('upgrade_current_plan'),
               badgeColor: AppTheme.success,
               showBadge: !isPremium,
               onTap: isPremium
@@ -82,11 +57,11 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       setState(() {});
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Switched to Free tier.')),
+                        SnackBar(content: Text(_tr.t('upgrade_switched_std'))),
                       );
                     }
                   : null,
-              buttonLabel: isPremium ? 'Switch to Free' : 'Active',
+              buttonLabel: isPremium ? _tr.t('upgrade_switch_std_btn') : _tr.t('upgrade_active'),
               buttonStyle: _TierButtonStyle.outlined,
             ),
 
@@ -97,15 +72,15 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
               isSelected: isPremium,
               icon: Icons.auto_awesome_rounded,
               iconColor: AppTheme.accent,
-              title: 'Premium',
-              subtitle: 'AI translation · Natural & context-aware',
-              features: const [
-                'Natural, fluent translations',
-                'Names & abbreviations handled intelligently',
-                'Results cached locally',
-                'Unlimited scans',
+              title: _tr.t('upgrade_premium'),
+              subtitle: _tr.t('upgrade_premium_sub'),
+              features: [
+                _tr.t('upgrade_prem_feat_1'),
+                _tr.t('upgrade_prem_feat_2'),
+                _tr.t('upgrade_prem_feat_3'),
+                _tr.t('upgrade_prem_feat_4'),
               ],
-              badgeLabel: 'Current Plan',
+              badgeLabel: _tr.t('upgrade_current_plan'),
               badgeColor: AppTheme.accent,
               showBadge: isPremium,
               onTap: !isPremium
@@ -114,12 +89,12 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       setState(() {});
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Switched to Premium AI translation!')),
+                        SnackBar(
+                            content: Text(_tr.t('upgrade_switched_prem'))),
                       );
                     }
                   : null,
-              buttonLabel: isPremium ? 'Active' : 'Switch to Premium',
+              buttonLabel: isPremium ? _tr.t('upgrade_active') : _tr.t('upgrade_switch_prem_btn'),
               buttonStyle: _TierButtonStyle.elevated,
             ),
 
@@ -174,7 +149,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
                       children: [
                         Text(
                           title,
@@ -185,10 +163,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                                 isSelected ? iconColor : AppTheme.textDark,
                           ),
                         ),
-                        if (showBadge) ...[
-                          const SizedBox(width: 8),
-                          _badge(badgeLabel, badgeColor),
-                        ],
+                        if (showBadge) _badge(badgeLabel, badgeColor),
                       ],
                     ),
                     const SizedBox(height: 2),
@@ -285,7 +260,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: AppTheme.fontXS,
           color: color,
           fontWeight: FontWeight.w600,
         ),

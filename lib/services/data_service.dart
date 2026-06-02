@@ -8,32 +8,47 @@ import 'auth_service.dart';
 /// SAVED TEXTS are scoped per Firebase user. The SharedPreferences key is
 ///   `saved_texts_<uid>` so two accounts on the same device never share data.
 ///
-/// SCAN COUNT STRATEGY (free-tier enforcement):
-///   Firestore is the authoritative store for the daily scan count so the
-///   limit cannot be bypassed by reinstalling the app or clearing local data.
-///   Local SharedPreferences acts as a fast cache:
-///     • syncScanCountFromRemote() — pulls Firestore count into local cache.
-///       Call once after sign-in (done in _goNext inside main.dart).
-///     • getFreeScanCount()        — reads local cache synchronously (fast).
-///     • incrementFreeScanCount()  — increments in Firestore AND local cache.
-///     • resetFreeScanCount()      — clears both local and Firestore.
+/// SCAN COUNT STRATEGY:
+///
+///   LOGGED-IN USERS (non-anonymous):
+///     Firestore is the authoritative store (cannot be bypassed by reinstall).
+///     Local SharedPreferences acts as a fast cache:
+///       • syncScanCountFromRemote() — pulls Firestore count into local cache.
+///         Called once after sign-in (done in _goNext inside main.dart).
+///       • getFreeScanCount()        — reads local cache synchronously.
+///       • incrementFreeScanCount()  — increments Firestore AND local cache.
+///       • resetFreeScanCount()      — clears both local and Firestore.
+///
+///   GUEST USERS (anonymous):
+///     Stored under a STABLE DEVICE-LEVEL key ('guest_scan_count' /
+///     'guest_scan_date') that is completely separate from any logged-in
+///     user's keys and from Firestore.  The anonymous UID is intentionally
+///     NOT used as part of the key because a new anonymous UID is issued on
+///     every sign-in, which would silently reset the counter each session.
+///     The guest key survives app restarts and is only reset at midnight
+///     (same daily-reset behaviour as free logged-in users).
 class DataService {
   // Legacy single-user key — kept only so we can migrate old data if needed.
   static const String _savedTextsKeyLegacy = 'saved_texts';
 
-  static const String _languageKey     = 'app_language';
-  static const String _fontSizeKey     = 'font_size';
-  static const String _serverUrlKey    = 'server_url';
+  static const String _languageKey  = 'app_language';
+  static const String _fontSizeKey  = 'font_size';
+  static const String _serverUrlKey = 'server_url';
 
-  static const String _voiceNamePrefix      = 'voice_name_';
-  static const String _voiceLocalePrefix    = 'voice_locale_';
+  static const String _voiceNamePrefix   = 'voice_name_';
+  static const String _voiceLocalePrefix = 'voice_locale_';
+  static const String _chineseDialectKey = 'chinese_dialect';
 
-
-  // Local scan-count cache keys (mirrors Firestore values after sync).
+  // ── Logged-in user scan-count cache keys (mirrors Firestore after sync) ──
   static const String _scanCountKey     = 'free_scan_count';
   static const String _scanCountDateKey = 'free_scan_count_date';
 
-  static const String _defaultServerUrl = 'https://api-udefzonqpa-as.a.run.app';
+  // ── Guest scan-count keys — stable device-level, never UID-scoped ────────
+  static const String _guestScanCountKey     = 'guest_scan_count';
+  static const String _guestScanCountDateKey = 'guest_scan_date';
+
+  static const String _defaultServerUrl =
+      'https://api-udefzonqpa-as.a.run.app';
 
   static final DataService _instance = DataService._internal();
   factory DataService() => _instance;
@@ -60,18 +75,26 @@ class DataService {
     return _prefs!;
   }
 
-  // ─── Per-user saved-texts key ─────────────────────────────────────────────
+  // ── Guest helper ──────────────────────────────────────────────────────────
+
+  /// Returns true when the current Firebase user is anonymous (guest).
+  bool get _isGuest {
+    final user = AuthService().currentUser;
+    return user == null || user.isAnonymous;
+  }
+
+  // ── Per-user saved-texts key ──────────────────────────────────────────────
 
   /// Returns `saved_texts_<uid>` for the currently signed-in user, or falls
-  /// back to the legacy key if no user is available (should not normally happen
-  /// once the app requires sign-in, but keeps things safe).
+  /// back to the legacy key if no user is available.
   String get _savedTextsKey {
     final uid = AuthService().currentUser?.uid;
     if (uid == null || uid.isEmpty) return _savedTextsKeyLegacy;
+    if (_isGuest) return 'saved_texts_guest_local';
     return 'saved_texts_$uid';
   }
 
-  // ─── Saved Texts ─────────────────────────────────────────────────────────
+  // ── Saved Texts ───────────────────────────────────────────────────────────
 
   Future<List<SavedText>> getSavedTexts() async {
     final raw = _p.getStringList(_savedTextsKey) ?? [];
@@ -127,7 +150,7 @@ class DataService {
     await _p.remove(_savedTextsKey);
   }
 
-  // ─── Language ─────────────────────────────────────────────────────────────
+  // ── Language ──────────────────────────────────────────────────────────────
 
   String getLanguage() => _p.getString(_languageKey) ?? 'en';
 
@@ -135,7 +158,7 @@ class DataService {
     await _p.setString(_languageKey, langCode);
   }
 
-  // ─── Font Size ────────────────────────────────────────────────────────────
+  // ── Font Size ─────────────────────────────────────────────────────────────
 
   double getFontSize() => _p.getDouble(_fontSizeKey) ?? 1.5;
 
@@ -143,7 +166,7 @@ class DataService {
     await _p.setDouble(_fontSizeKey, size);
   }
 
-  // ─── Server URL ───────────────────────────────────────────────────────────
+  // ── Server URL ────────────────────────────────────────────────────────────
 
   String getServerUrl() => _p.getString(_serverUrlKey) ?? _defaultServerUrl;
 
@@ -152,7 +175,7 @@ class DataService {
     await _p.setString(_serverUrlKey, clean);
   }
 
-  // ─── Per-Language TTS Voice ───────────────────────────────────────────────
+  // ── Per-Language TTS Voice ────────────────────────────────────────────────
 
   String? getVoiceNameForLang(String langCode) =>
       _p.getString('$_voiceNamePrefix$langCode');
@@ -160,7 +183,8 @@ class DataService {
   String? getVoiceLocaleForLang(String langCode) =>
       _p.getString('$_voiceLocalePrefix$langCode');
 
-  Future<void> setVoiceForLang(String langCode, String name, String locale) async {
+  Future<void> setVoiceForLang(
+      String langCode, String name, String locale) async {
     await _p.setString('$_voiceNamePrefix$langCode', name);
     await _p.setString('$_voiceLocalePrefix$langCode', locale);
   }
@@ -168,6 +192,17 @@ class DataService {
   Future<void> clearVoiceForLang(String langCode) async {
     await _p.remove('$_voiceNamePrefix$langCode');
     await _p.remove('$_voiceLocalePrefix$langCode');
+  }
+
+  // ── Chinese Dialect Preference ────────────────────────────────────────────
+
+  /// Returns the saved Chinese dialect: 'mandarin', 'cantonese', or 'hokkien'.
+  /// Defaults to 'mandarin' if nothing has been saved yet.
+  String getChineseDialect() =>
+      _p.getString(_chineseDialectKey) ?? 'mandarin';
+
+  Future<void> setChineseDialect(String dialect) async {
+    await _p.setString(_chineseDialectKey, dialect);
   }
 
   Map<String, Map<String, String>> getAllSavedVoices(List<String> langCodes) {
@@ -182,20 +217,21 @@ class DataService {
     return result;
   }
 
-  // ─── Legacy single-voice helpers ──────────────────────────────────────────
+  // ── Legacy single-voice helpers ───────────────────────────────────────────
 
-  String? getPreferredVoiceName() => getVoiceNameForLang('en');
+  String? getPreferredVoiceName()  => getVoiceNameForLang('en');
   String? getPreferredVoiceLocale() => getVoiceLocaleForLang('en');
   Future<void> setPreferredVoice(String name, String locale) async =>
       setVoiceForLang('en', name, locale);
   Future<void> clearPreferredVoice() async => clearVoiceForLang('en');
 
-  // ─── Free-tier Scan Count ─────────────────────────────────────────────────
+  // ── Scan Count (public API — routes to guest or logged-in path) ───────────
 
   /// Pulls the authoritative count from Firestore into the local cache.
-  /// Call once after sign-in (done in _goNext inside main.dart).
-  /// HomeScreen reads the local cache synchronously via getFreeScanCount().
+  /// Only meaningful for logged-in (non-anonymous) users.
+  /// For guests this is a no-op — their count lives in [_guestScanCountKey].
   Future<void> syncScanCountFromRemote() async {
+    if (_isGuest) return; // Guest count never touches Firestore.
     try {
       final remote = await AuthService().getRemoteScanCount();
       final today  = _todayKey();
@@ -204,29 +240,70 @@ class DataService {
       debugPrint('[DataService] syncScanCountFromRemote → $remote');
     } catch (e) {
       debugPrint('[DataService] syncScanCountFromRemote error: $e');
-      // Keep whatever is in local cache.
     }
   }
 
-  String _todayKey() {
-    final now = DateTime.now();
-    return '${now.year}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
+  /// How many scans have been used today.
+  /// Routes to the guest path or the logged-in path automatically.
+  int getFreeScanCount() {
+    return _isGuest ? _getGuestScanCount() : _getLoggedInScanCount();
   }
 
-  /// How many scans have been used today (free tier) — reads local cache.
-  /// Always returns 0 for a new day (local date check).
-  int getFreeScanCount() {
+  /// Increments the daily scan counter.
+  /// Routes to the guest path or the logged-in path automatically.
+  Future<int> incrementFreeScanCount() async {
+    return _isGuest
+        ? await _incrementGuestScanCount()
+        : await _incrementLoggedInScanCount();
+  }
+
+  /// Resets the daily scan counter (call after upgrading to premium).
+  Future<void> resetFreeScanCount() async {
+    if (_isGuest) {
+      await _resetGuestScanCount();
+    } else {
+      await _resetLoggedInScanCount();
+    }
+  }
+
+  // ── Guest scan-count implementation ───────────────────────────────────────
+  //
+  // Uses a fixed device-level key so the count persists across all
+  // anonymous sessions on the same device and is never shared with any
+  // logged-in user's count.
+
+  int _getGuestScanCount() {
+    final savedDate = _p.getString(_guestScanCountDateKey) ?? '';
+    if (savedDate != _todayKey()) return 0;
+    return _p.getInt(_guestScanCountKey) ?? 0;
+  }
+
+  Future<int> _incrementGuestScanCount() async {
+    final today      = _todayKey();
+    final savedDate  = _p.getString(_guestScanCountDateKey) ?? '';
+    final current    = (savedDate == today) ? (_p.getInt(_guestScanCountKey) ?? 0) : 0;
+    final next       = current + 1;
+    await _p.setInt(_guestScanCountKey, next);
+    await _p.setString(_guestScanCountDateKey, today);
+    debugPrint('[DataService] guest incrementFreeScanCount → $next');
+    return next;
+  }
+
+  Future<void> _resetGuestScanCount() async {
+    await _p.remove(_guestScanCountKey);
+    await _p.remove(_guestScanCountDateKey);
+    debugPrint('[DataService] guest resetFreeScanCount OK');
+  }
+
+  // ── Logged-in scan-count implementation ───────────────────────────────────
+
+  int _getLoggedInScanCount() {
     final savedDate = _p.getString(_scanCountDateKey) ?? '';
     if (savedDate != _todayKey()) return 0;
     return _p.getInt(_scanCountKey) ?? 0;
   }
 
-  /// Increments the daily scan counter in Firestore (source of truth) AND
-  /// in the local cache. Returns the new count.
-  /// If Firestore fails, only the local count is incremented (offline fallback).
-  Future<int> incrementFreeScanCount() async {
+  Future<int> _incrementLoggedInScanCount() async {
     // 1. Increment in Firestore (authoritative).
     int? remoteCount;
     try {
@@ -237,8 +314,8 @@ class DataService {
     }
 
     // 2. Update local cache to match Firestore, or +1 locally if offline.
-    final today     = _todayKey();
-    final savedDate = _p.getString(_scanCountDateKey) ?? '';
+    final today      = _todayKey();
+    final savedDate  = _p.getString(_scanCountDateKey) ?? '';
     final localCount = (savedDate == today) ? (_p.getInt(_scanCountKey) ?? 0) : 0;
 
     final newCount = remoteCount ?? (localCount + 1);
@@ -249,9 +326,7 @@ class DataService {
     return newCount;
   }
 
-  /// Resets the daily scan counter (call after upgrading to premium).
-  /// Clears both local cache and Firestore.
-  Future<void> resetFreeScanCount() async {
+  Future<void> _resetLoggedInScanCount() async {
     await _p.remove(_scanCountKey);
     await _p.remove(_scanCountDateKey);
     try {
@@ -262,4 +337,12 @@ class DataService {
     }
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  String _todayKey() {
+    final now = DateTime.now();
+    return '${now.year}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+  }
 }

@@ -38,10 +38,12 @@ async function extractTextFromImage(base64Image, mimeType = "image/jpeg") {
                   type: "text",
                   text: `You are an OCR assistant for elderly users.
 Extract the MAIN, meaningful body text from this image exactly as it appears.
-Please IGNORE irrelevant system UI, battery percentages, clocks, times, URLs, 
+Correct for any image rotation or orientation
+to ensure text is extracted in its proper reading order.
+Please IGNORE irrelevant system UI, battery percentages, clocks, times, URLs,
 and navigation menus if it is a screenshot.
 Preserve line breaks and paragraph structure of the actual content.
-Do not add any commentary, explanation, or formatting 
+Do not add any commentary, explanation, or formatting
 — output strictly the raw extracted text.
 If there is no readable text, respond with: [No text found]`,
                 },

@@ -43,7 +43,11 @@ class AuthService {
   }
 
   Future<UserCredential?> signInWithGoogle() async {
-    await _googleSignIn.signOut();
+    try {
+      await _googleSignIn.signOut().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[AuthService] signInWithGoogle pre-sign-out error: $e');
+    }
     final googleUser = await _googleSignIn.signIn();
     if (googleUser == null) return null;
 
@@ -97,7 +101,39 @@ class AuthService {
   // ── Sign out ──────────────────────────────────────────────────────────────
 
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
+    final user = _auth.currentUser;
+    
+    bool isGoogleSignIn = false;
+    if (user != null) {
+      for (final userInfo in user.providerData) {
+        if (userInfo.providerId == 'google.com') {
+          isGoogleSignIn = true;
+          break;
+        }
+      }
+    }
+
+    if (isGoogleSignIn) {
+      try {
+        await _googleSignIn.signOut().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('[AuthService] Google sign out error: $e');
+      }
+    } else {
+      debugPrint('[AuthService] User not signed in with Google. Skipping Google signOut.');
+    }
+    
+    if (user != null && user.isAnonymous) {
+      try {
+        // Deleting the user automatically signs them out locally and removes
+        // the abandoned account from the Firebase Authentication console.
+        await user.delete();
+        return;
+      } catch (e) {
+        debugPrint('[AuthService] Failed to delete anonymous user: $e');
+      }
+    }
+    
     await _auth.signOut();
   }
 
@@ -130,7 +166,7 @@ class AuthService {
     final ref   = _firestore.collection('users').doc(docId);
 
     try {
-      final snap = await ref.get();
+      final snap = await ref.get().timeout(const Duration(seconds: 5));
       if (snap.exists) {
         debugPrint('[AuthService] ensureUserDocument: already exists — OK');
         return;
@@ -179,7 +215,7 @@ class AuthService {
 
     try {
       // Plain set() — no merge — so Firestore always evaluates allow create.
-      await _firestore.collection('users').doc(docId).set(doc);
+      await _firestore.collection('users').doc(docId).set(doc).timeout(const Duration(seconds: 5));
       debugPrint('[AuthService] *** USER DOCUMENT WRITTEN SUCCESSFULLY *** docId: $docId');
     } catch (e, st) {
       // Log but never rethrow — a Firestore failure must never break sign-up.

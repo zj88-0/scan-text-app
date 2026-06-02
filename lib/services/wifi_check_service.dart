@@ -1,6 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
+import 'translation_service.dart';
 
 /// WiFiCheckService
 /// Checks connectivity before any model download and shows a large-text,
@@ -83,10 +84,10 @@ class WiFiCheckService {
                 color: AppTheme.accent,
               ),
             ),
-            const Text(
-              'Not on Wi-Fi',
+            Text(
+              AppTranslations().t('wifi_check_not_wifi'),
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: AppTheme.fontLG,
                 fontWeight: FontWeight.bold,
                 color: AppTheme.primary,
@@ -96,13 +97,10 @@ class WiFiCheckService {
         ),
 
         // ── Body text ─────────────────────────────────────────────────────
-        content: const Text(
-          'You are using mobile data or a hotspot.\n\n'
-              'The translation files are large (about 30 MB each). '
-              'Downloading on mobile data may be slow and could use up your data plan.\n\n'
-              'It is best to connect to Wi-Fi first.',
+        content: Text(
+          AppTranslations().t('wifi_check_desc'),
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: AppTheme.fontSM,
             color: AppTheme.textDark,
             height: 1.6,
@@ -115,9 +113,9 @@ class WiFiCheckService {
           OutlinedButton.icon(
             onPressed: () => Navigator.pop(ctx, false),
             icon: const Icon(Icons.wifi_rounded, size: 26),
-            label: const Text(
-              'Wait for Wi-Fi',
-              style: TextStyle(
+            label: Text(
+              AppTranslations().t('wifi_check_wait'),
+              style: const TextStyle(
                 fontSize: AppTheme.fontSM,
                 fontWeight: FontWeight.bold,
               ),
@@ -135,9 +133,9 @@ class WiFiCheckService {
             style: TextButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: const Text(
-              'Download Anyway',
-              style: TextStyle(
+            child: Text(
+              AppTranslations().t('wifi_check_download'),
+              style: const TextStyle(
                 fontSize: AppTheme.fontXS,
                 color: AppTheme.textMedium,
               ),
@@ -170,10 +168,10 @@ class WiFiCheckService {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'No Internet',
+            Text(
+              AppTranslations().t('wifi_check_no_internet'),
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: AppTheme.fontLG,
                 fontWeight: FontWeight.bold,
                 color: AppTheme.danger,
@@ -181,11 +179,10 @@ class WiFiCheckService {
             ),
           ],
         ),
-        content: const Text(
-          'Your phone is not connected to the internet.\n\n'
-              'Please turn on Wi-Fi and try again.',
+        content: Text(
+          AppTranslations().t('wifi_check_no_internet_desc'),
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: AppTheme.fontSM,
             color: AppTheme.textDark,
             height: 1.6,
@@ -195,9 +192,9 @@ class WiFiCheckService {
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx),
             icon: const Icon(Icons.check_rounded, size: 26),
-            label: const Text(
-              'OK',
-              style: TextStyle(
+            label: Text(
+              AppTranslations().t('wifi_check_ok'),
+              style: const TextStyle(
                 fontSize: AppTheme.fontSM,
                 fontWeight: FontWeight.bold,
               ),

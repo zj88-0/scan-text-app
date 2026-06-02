@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'translation_service.dart';
 import 'data_service.dart';
+import 'hokkien_tts_service.dart';
 
 /// TtsService wraps flutter_tts for easy read-aloud of extracted text.
 /// Each language can have its own preferred voice, set via VoiceSelectionScreen.
@@ -33,21 +34,27 @@ class TtsService {
     _tts.setCompletionHandler(() {
       _isSpeaking = false;
       onComplete?.call();
-      _completer?.complete();
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.complete();
+      }
       _completer = null;
     });
 
     _tts.setErrorHandler((msg) {
       _isSpeaking = false;
       onComplete?.call();
-      _completer?.completeError(msg);
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.completeError(msg);
+      }
       _completer = null;
     });
 
     _tts.setCancelHandler(() {
       _isSpeaking = false;
       onComplete?.call();
-      _completer?.complete();
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.complete();
+      }
       _completer = null;
     });
   }
@@ -73,15 +80,43 @@ class TtsService {
   }
 
   /// Speak [text] using the saved preferred voice for [langCode].
-  /// Falls back to locale-based selection if no voice is saved.
+  /// For Chinese, routes to the correct dialect engine.
   Future<void> speak(String text, {String? langCode}) async {
     if (text.isEmpty) return;
 
     final data = DataService();
     final code = langCode ?? AppTranslations().currentLang;
-    final preferredName = data.getVoiceNameForLang(code);
-    final preferredLocale = data.getVoiceLocaleForLang(code);
 
+    // ── Chinese dialect routing ───────────────────────────────────────────
+    if (code == 'zh') {
+      final dialect = data.getChineseDialect();
+      if (dialect == 'hokkien') {
+        _isSpeaking = true;
+        onStart?.call();
+        await HokkienTtsService().speak(text);
+        _isSpeaking = false;
+        onComplete?.call();
+        if (_completer != null && !_completer!.isCompleted) {
+          _completer!.complete();
+        }
+        return;
+      }
+      // Mandarin or Cantonese: use system TTS with saved voice or locale.
+      final preferredName   = data.getVoiceNameForLang('zh');
+      final preferredLocale = data.getVoiceLocaleForLang('zh');
+      if (preferredName != null && preferredLocale != null) {
+        await _tts.setVoice({'name': preferredName, 'locale': preferredLocale});
+      } else {
+        final fallback = dialect == 'cantonese' ? 'zh-HK' : 'zh-CN';
+        await _tts.setLanguage(fallback);
+      }
+      await _tts.speak(text);
+      return;
+    }
+
+    // ── All other languages ───────────────────────────────────────────────
+    final preferredName   = data.getVoiceNameForLang(code);
+    final preferredLocale = data.getVoiceLocaleForLang(code);
     if (preferredName != null && preferredLocale != null) {
       await _tts.setVoice({'name': preferredName, 'locale': preferredLocale});
     } else {
@@ -101,7 +136,9 @@ class TtsService {
       await _tts.speak(text);
       await _completer!.future;
     } catch (_) {
-      _completer?.complete();
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.complete();
+      }
       _completer = null;
     }
   }
@@ -116,8 +153,11 @@ class TtsService {
 
   Future<void> stop() async {
     await _tts.stop();
+    await HokkienTtsService().stop(); // stop Hokkien engine if it was speaking
     _isSpeaking = false;
-    _completer?.complete();
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+    }
     _completer = null;
   }
 

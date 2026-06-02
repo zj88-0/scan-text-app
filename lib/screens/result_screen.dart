@@ -252,7 +252,7 @@ class _ResultScreenState extends State<ResultScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(_tr.t('result_title')),
+        title: Text(_tr.t('result_title'), maxLines: 1, overflow: TextOverflow.ellipsis),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded, size: 30),
           onPressed: () {
@@ -513,9 +513,9 @@ class _ResultScreenState extends State<ResultScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Voice',
+                    _tr.t('voice_btn'),
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: AppTheme.fontXS,
                       color: hasCustomVoice
                           ? AppTheme.primary
                           : AppTheme.textLight,

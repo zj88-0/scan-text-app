@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../app_theme.dart';
@@ -16,6 +17,7 @@ import '../widgets/saved_text_card.dart';
 import 'result_screen.dart';
 import 'settings_screen.dart';
 import 'upgrade_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onLanguageChanged;
@@ -34,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final PremiumService _premium = PremiumService();
 
-  // Right-panel scaffold key
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<SavedText> _savedTexts = [];
@@ -42,13 +43,16 @@ class _HomeScreenState extends State<HomeScreen> {
   String _loadingStep = '';
   String _currentLang = 'en';
 
-  // ── Search state ──────────────────────────────────────────────────────────
   bool _searchActive = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
 
   static const int _freeDailyLimit = 3;
+
+  // ── Guest helper ──────────────────────────────────────────────────────────
+
+  bool get _isGuest => FirebaseAuth.instance.currentUser?.isAnonymous ?? false;
 
   @override
   void initState() {
@@ -65,6 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedTexts() async {
+    // Guest users have no saved texts persisted (UID is ephemeral),
+    // so the list will simply be empty — no change needed.
     final texts = await _dataService.getSavedTexts();
     if (mounted) setState(() => _savedTexts = texts);
   }
@@ -81,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openSearch() {
-    // Close the end drawer if open
     if (_scaffoldKey.currentState?.isEndDrawerOpen == true) {
       Navigator.pop(context);
     }
@@ -106,12 +111,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Free-tier scan limit ──────────────────────────────────────────────────
 
-  /// Returns true if the user can scan, false if limit is reached.
   bool _canScan() {
     if (_premium.isPremium) return true;
     return _dataService.getFreeScanCount() < _freeDailyLimit;
   }
 
+  /// Shows the limit dialog. For guest users it also offers to sign in.
+  /// For free (logged-in) users it offers to upgrade.
   void _showScanLimitDialog() {
     showDialog<void>(
       context: context,
@@ -134,10 +140,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Daily Limit Reached',
+            Text(
+              _tr.t('home_daily_limit_title'),
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: AppTheme.fontLG,
                 fontWeight: FontWeight.bold,
                 color: AppTheme.primary,
@@ -145,51 +151,171 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        content: const Text(
-          'You have used all 3 free scans for today.\n\n'
-              'Upgrade to Premium for unlimited scans, natural AI translation, '
-              'and much more.',
+        content: Text(
+          _isGuest
+              ? _tr.t('home_daily_limit_guest')
+              : _tr.t('home_daily_limit_free'),
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: AppTheme.fontSM,
             color: AppTheme.textDark,
             height: 1.6,
           ),
         ),
         actions: [
-          // Upgrade button
+          if (_isGuest) ...[
+            // Primary: Sign In / Create Account
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await AuthService().signOut(); // signs out anonymous user
+                // AppRoot listens to authStateChanges → will show LoginScreen
+              },
+              icon: const Icon(Icons.login_rounded, size: 24),
+              label: Text(
+                _tr.t('home_sign_in_create'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                minimumSize: const Size(double.infinity, 64),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(double.infinity, 52),
+              ),
+              child: Text(
+                _tr.t('home_maybe_later'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontXS,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ),
+          ] else ...[
+            // Primary: Upgrade to Premium
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+                );
+                setState(() {});
+              },
+              icon: const Icon(Icons.auto_awesome_rounded, size: 22),
+              label: Text(
+                _tr.t('home_upgrade_premium'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                minimumSize: const Size(double.infinity, 64),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(double.infinity, 52),
+              ),
+              child: Text(
+                _tr.t('home_maybe_later'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontXS,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Upgrade dialog for guests trying to access premium ────────────────────
+
+  /// Shows a dialog asking the guest to log in before accessing premium.
+  void _showGuestUpgradeBlockedDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        title: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.lock_rounded,
+                size: 48,
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _tr.t('home_sign_in_required'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: AppTheme.fontLG,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          _tr.t('home_sign_in_required_desc'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: AppTheme.fontSM,
+            color: AppTheme.textDark,
+            height: 1.6,
+          ),
+        ),
+        actions: [
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(ctx);
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const UpgradeScreen()),
-              );
-              setState(() {}); // refresh premium badge / scan count
+              await AuthService().signOut();
+              // AppRoot listens → navigates to LoginScreen
             },
-            icon: const Icon(Icons.auto_awesome_rounded, size: 22),
-            label: const Text(
-              'Upgrade to Premium',
-              style: TextStyle(
+            icon: const Icon(Icons.login_rounded, size: 24),
+            label: Text(
+              _tr.t('home_sign_in_create'),
+              style: const TextStyle(
                 fontSize: AppTheme.fontSM,
                 fontWeight: FontWeight.bold,
               ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.accent,
-              minimumSize: const Size(double.infinity, 60),
+              backgroundColor: AppTheme.primary,
+              minimumSize: const Size(double.infinity, 64),
             ),
           ),
           const SizedBox(height: 10),
-          // Dismiss
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             style: TextButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: const Text(
-              'Maybe Later',
-              style: TextStyle(
+            child: Text(
+              _tr.t('home_not_now'),
+              style: const TextStyle(
                 fontSize: AppTheme.fontXS,
                 color: AppTheme.textMedium,
               ),
@@ -203,7 +329,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Image helpers ─────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
-    // Check free-tier scan limit before opening camera / gallery
     if (!_canScan()) {
       _showScanLimitDialog();
       return;
@@ -224,15 +349,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<({Uint8List bytes, int originalKb, int? compressedKb})>
-  _getOptimizedImage(File file) async {
+      _getOptimizedImage(File file) async {
     final int originalSize = file.lengthSync();
     final int originalKb = (originalSize / 1024).round();
 
     if (originalSize < 500 * 1024) {
       return (
-      bytes: await file.readAsBytes(),
-      originalKb: originalKb,
-      compressedKb: null,
+        bytes: await file.readAsBytes(),
+        originalKb: originalKb,
+        compressedKb: null,
       );
     }
 
@@ -246,16 +371,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (result != null) {
       return (
-      bytes: result,
-      originalKb: originalKb,
-      compressedKb: (result.length / 1024).round(),
+        bytes: result,
+        originalKb: originalKb,
+        compressedKb: (result.length / 1024).round(),
       );
     }
 
     return (
-    bytes: await file.readAsBytes(),
-    originalKb: originalKb,
-    compressedKb: null,
+      bytes: await file.readAsBytes(),
+      originalKb: originalKb,
+      compressedKb: null,
     );
   }
 
@@ -266,12 +391,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      setState(() => _loadingStep = 'Checking image size...');
+      setState(() => _loadingStep = _tr.t('home_checking_size'));
       final imageInfo = await _getOptimizedImage(imageFile);
 
       File fileToSend = imageFile;
       if (imageInfo.compressedKb != null) {
-        final tempDir = await Directory.systemTemp.createTemp('ocr_compressed_');
+        final tempDir =
+            await Directory.systemTemp.createTemp('ocr_compressed_');
         final tempFile = File('${tempDir.path}/compressed.jpg');
         await tempFile.writeAsBytes(imageInfo.bytes);
         fileToSend = tempFile;
@@ -280,14 +406,12 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _loadingStep = _tr.t('processing'));
       final originalText = await _apiService.processImage(fileToSend);
 
-      // Guard: if OCR returned nothing, bail out gracefully
       if (originalText.trim().isEmpty) {
         setState(() => _loading = false);
         _showError(_tr.t('error_generic'));
         return;
       }
 
-      // Increment free-tier scan counter AFTER a successful OCR call
       if (_premium.isFree) {
         await _dataService.incrementFreeScanCount();
       }
@@ -295,14 +419,12 @@ class _HomeScreenState extends State<HomeScreen> {
       Map<String, String> translations = {};
 
       if (_premium.isFree) {
-        setState(() => _loadingStep = 'Translating...');
+        setState(() => _loadingStep = _tr.t('home_translating'));
         translations = await _mlkit.translateToAllConfigured(originalText);
       } else {
         translations = {'en': originalText};
       }
 
-      // Re-check mounted BEFORE clearing loading state and navigating.
-      // On first run the widget can be remounted during the async gap.
       if (!mounted) return;
 
       setState(() => _loading = false);
@@ -343,26 +465,26 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        final innerController =
-        TextEditingController(text: text.name ?? '');
+        final innerController = TextEditingController(text: text.name ?? '');
         return AlertDialog(
           shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text(
-            'Name this entry',
-            style: TextStyle(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            _tr.t('home_name_entry'),
+            style: const TextStyle(
               fontSize: AppTheme.fontMD,
               fontWeight: FontWeight.bold,
               color: AppTheme.primary,
             ),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Give this scan a short name so it is easy to find later.',
-                style: TextStyle(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              Text(
+                _tr.t('home_name_entry_desc'),
+                style: const TextStyle(
                   fontSize: AppTheme.fontXS,
                   color: AppTheme.textMedium,
                   height: 1.5,
@@ -377,28 +499,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontSize: AppTheme.fontSM,
                   color: AppTheme.textDark,
                 ),
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Doctor letter, Medicine label…',
-                  counterStyle: TextStyle(fontSize: AppTheme.fontXS),
+                decoration: InputDecoration(
+                  hintText: _tr.t('home_name_hint'),
+                  counterStyle: const TextStyle(fontSize: AppTheme.fontXS),
                 ),
               ),
-            ],
+              ],
+            ),
           ),
           actionsPadding: const EdgeInsets.all(16),
           actions: [
             OutlinedButton(
               onPressed: () => Navigator.pop(ctx),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(100, 52),
-              ),
-              child: const Text('Cancel'),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+              child: Text(_tr.t('cancel'),
+                  style: const TextStyle(fontSize: AppTheme.fontXS)),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, innerController.text),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(100, 52),
-              ),
-              child: const Text('Save Name'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(100, 52)),
+              child: Text(_tr.t('home_save_name'),
+                  style: const TextStyle(fontSize: AppTheme.fontXS)),
             ),
           ],
         );
@@ -427,9 +548,9 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style:
-            OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
-            child: Text(_tr.t('cancel')),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(100, 52)),
+            child: Text(_tr.t('cancel'),
+                style: const TextStyle(fontSize: AppTheme.fontXS)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -437,7 +558,8 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: AppTheme.danger,
               minimumSize: const Size(100, 52),
             ),
-            child: Text(_tr.t('confirm_delete')),
+            child: Text(_tr.t('confirm_delete'),
+                style: const TextStyle(fontSize: AppTheme.fontXS)),
           ),
         ],
       ),
@@ -452,7 +574,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
+        content: Text(msg, style: const TextStyle(fontSize: AppTheme.fontXS)),
         backgroundColor: AppTheme.danger,
         duration: const Duration(seconds: 4),
       ),
@@ -471,19 +593,30 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false, // Prevent back navigation to the model-download loading screen
+      canPop: false,
       child: Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          title: _searchActive ? _buildSearchField() : Text(_tr.t('home_title')),
+          title: _searchActive
+              ? _buildSearchField()
+              : Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _tr.t('home_title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
           actions: _buildAppBarActions(),
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(56),
             child: Container(
               color: AppTheme.primary,
-              padding:
-              const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               child: LanguageSelector(
                 currentLang: _currentLang,
                 onChanged: _changeLanguage,
@@ -491,7 +624,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        // ── Right-side panel (end drawer) ─────────────────────────────────────
         endDrawer: _buildEndDrawer(),
         body: _loading ? _buildLoading() : _buildBody(),
         bottomNavigationBar: _loading ? null : _buildBottomButtons(),
@@ -533,31 +665,38 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Plan badge
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isPremium
-                          ? AppTheme.accent
-                          : Colors.white.withOpacity(0.20),
+                      color: _isGuest
+                          ? Colors.white.withOpacity(0.20)
+                          : isPremium
+                              ? AppTheme.accent
+                              : Colors.white.withOpacity(0.20),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          isPremium
-                              ? Icons.auto_awesome_rounded
-                              : Icons.phone_android_rounded,
+                          _isGuest
+                              ? Icons.person_outline_rounded
+                              : isPremium
+                                  ? Icons.auto_awesome_rounded
+                                  : Icons.phone_android_rounded,
                           size: 14,
                           color: Colors.white,
                         ),
                         const SizedBox(width: 5),
                         Text(
-                          isPremium ? 'Premium' : 'Free Plan',
+                          _isGuest
+                              ? _tr.t('home_guest')
+                              : isPremium
+                                  ? _tr.t('home_premium')
+                                  : _tr.t('home_free_plan'),
                           style: const TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTheme.fontXS,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                           ),
@@ -574,29 +713,37 @@ class _HomeScreenState extends State<HomeScreen> {
             // ── Search button ────────────────────────────────────────────
             _drawerButton(
               icon: Icons.search_rounded,
-              label: 'Search',
+              label: _tr.t('home_search'),
               onTap: _savedTexts.isEmpty
                   ? null
                   : () {
-                Navigator.pop(context); // close drawer
-                _openSearch();
-              },
+                      Navigator.pop(context);
+                      _openSearch();
+                    },
               enabled: _savedTexts.isNotEmpty,
             ),
 
             const SizedBox(height: 4),
 
-            // ── Upgrade button ───────────────────────────────────────────
+            // ── Upgrade button (guests see "Sign In to Upgrade") ─────────
             _drawerButton(
-              icon: Icons.auto_awesome_rounded,
-              label: isPremium ? 'Manage Plan' : 'Upgrade to Premium',
+              icon: _isGuest ? Icons.login_rounded : Icons.auto_awesome_rounded,
+              label: _isGuest
+                  ? _tr.t('home_sign_in_upgrade')
+                  : isPremium
+                      ? _tr.t('home_manage_plan')
+                      : _tr.t('home_upgrade_premium'),
               onTap: () async {
                 Navigator.pop(context);
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
-                );
-                setState(() {});
+                if (_isGuest) {
+                  _showGuestUpgradeBlockedDialog();
+                } else {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+                  );
+                  setState(() {});
+                }
               },
               highlight: !isPremium,
             ),
@@ -620,7 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const Spacer(),
 
-            // ── Daily scan usage (free only) ─────────────────────────────
+            // ── Daily scan usage ─────────────────────────────────────────
             if (!isPremium) ...[
               const Divider(height: 1),
               Padding(
@@ -638,14 +785,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               : AppTheme.primary,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          'Daily Scans',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontXS,
-                            fontWeight: FontWeight.bold,
-                            color: scansLeft == 0
-                                ? AppTheme.danger
-                                : AppTheme.primary,
+                        Expanded(
+                          child: Text(
+                            _tr.t('home_daily_scans'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSM,
+                              fontWeight: FontWeight.bold,
+                              color: scansLeft == 0
+                                  ? AppTheme.danger
+                                  : AppTheme.primary,
+                            ),
                           ),
                         ),
                       ],
@@ -657,16 +808,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         value: scansUsed / _freeDailyLimit,
                         minHeight: 10,
                         backgroundColor: AppTheme.cardBorder,
-                        color: scansLeft == 0
-                            ? AppTheme.danger
-                            : AppTheme.accent,
+                        color:
+                            scansLeft == 0 ? AppTheme.danger : AppTheme.accent,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '$scansLeft of $_freeDailyLimit scans left today',
+                      '$scansLeft ${_tr.t('home_of')} $_freeDailyLimit ${_tr.t('home_scans_left')}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: AppTheme.fontXS,
+                        fontSize: AppTheme.fontSM,
                         color: scansLeft == 0
                             ? AppTheme.danger
                             : AppTheme.textMedium,
@@ -684,7 +836,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// A single large tappable row for the end drawer.
   Widget _drawerButton({
     required IconData icon,
     required String label,
@@ -693,9 +844,8 @@ class _HomeScreenState extends State<HomeScreen> {
     bool enabled = true,
   }) {
     final color = highlight ? AppTheme.accent : AppTheme.primary;
-    final bgColor = highlight
-        ? AppTheme.accent.withOpacity(0.08)
-        : Colors.transparent;
+    final bgColor =
+        highlight ? AppTheme.accent.withOpacity(0.08) : Colors.transparent;
 
     return Opacity(
       opacity: enabled ? 1.0 : 0.45,
@@ -708,7 +858,8 @@ class _HomeScreenState extends State<HomeScreen> {
             color: bgColor,
             borderRadius: BorderRadius.circular(14),
             border: highlight
-                ? Border.all(color: AppTheme.accent.withOpacity(0.4), width: 1.5)
+                ? Border.all(
+                    color: AppTheme.accent.withOpacity(0.4), width: 1.5)
                 : null,
           ),
           child: Row(
@@ -718,10 +869,11 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: Text(
                   label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: AppTheme.fontSM,
-                    fontWeight:
-                    highlight ? FontWeight.bold : FontWeight.w600,
+                    fontWeight: highlight ? FontWeight.bold : FontWeight.w600,
                     color: color,
                   ),
                 ),
@@ -754,12 +906,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         cursorColor: AppTheme.primary,
         decoration: InputDecoration(
-          hintText: 'Search by name…',
+          hintText: _tr.t('home_search_by_name'),
           hintStyle: const TextStyle(
             color: AppTheme.textLight,
             fontSize: AppTheme.fontSM,
           ),
-          prefixIcon: const Icon(
+          prefixIcon: Icon(
             Icons.search_rounded,
             color: AppTheme.primary,
             size: 24,
@@ -768,7 +920,7 @@ class _HomeScreenState extends State<HomeScreen> {
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          contentPadding: EdgeInsets.symmetric(vertical: 12),
         ),
         onChanged: (v) => setState(() => _searchQuery = v),
       ),
@@ -781,7 +933,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_searchQuery.isNotEmpty)
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 26),
-            tooltip: 'Clear',
+            tooltip: _tr.t('home_clear'),
             onPressed: () {
               _searchController.clear();
               setState(() => _searchQuery = '');
@@ -790,7 +942,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         IconButton(
           icon: const Icon(Icons.search_off_rounded, size: 28),
-          tooltip: 'Close search',
+          tooltip: _tr.t('home_close_search'),
           onPressed: _closeSearch,
         ),
         const SizedBox(width: 4),
@@ -798,43 +950,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return [
-      // Premium badge
-      if (_premium.isPremium)
-        Container(
-          margin: const EdgeInsets.only(right: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: AppTheme.accent,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.auto_awesome_rounded, size: 16, color: Colors.white),
-              SizedBox(width: 4),
-              Text(
-                'Premium',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-      // Search button — only shown when there are saved texts
-      if (_savedTexts.isNotEmpty)
-        IconButton(
-          icon: const Icon(Icons.search_rounded, size: 30),
-          tooltip: 'Search by name',
-          onPressed: _openSearch,
-        ),
-
-      // Hamburger menu — opens right panel
       IconButton(
-        icon: const Icon(Icons.menu_rounded, size: 30),
+        icon: const Icon(Icons.menu_rounded),
+        iconSize: 42,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        alignment: Alignment.center,
         tooltip: 'Menu',
         onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
       ),
@@ -880,7 +1001,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   size: 90, color: AppTheme.primary.withOpacity(0.25)),
               const SizedBox(height: 24),
               Text(
-                _tr.t('no_saved_texts'),
+                _isGuest
+                    ? _tr.t('home_no_saved_texts_guest')
+                    : _tr.t('no_saved_texts'),
                 style: const TextStyle(
                   fontSize: AppTheme.fontMD,
                   color: AppTheme.textMedium,
@@ -899,71 +1022,68 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── List header ──────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
           child: _searchActive && _searchQuery.isNotEmpty
               ? RichText(
-            text: TextSpan(
-              style: const TextStyle(
-                fontSize: AppTheme.fontMD,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-              children: [
-                TextSpan(
-                  text: displayed.isEmpty
-                      ? 'No results for '
-                      : '${displayed.length} result${displayed.length == 1 ? '' : 's'} for ',
-                ),
-                TextSpan(
-                  text: '"$_searchQuery"',
-                  style: const TextStyle(color: AppTheme.accent),
-                ),
-              ],
-            ),
-          )
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontMD,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primary,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: displayed.isEmpty
+                            ? '${_tr.t('home_no_results')} '
+                            : '${displayed.length} ${displayed.length == 1 ? _tr.t('home_result') : _tr.t('home_results')} ',
+                      ),
+                      TextSpan(
+                        text: '"$_searchQuery"',
+                        style: const TextStyle(color: AppTheme.accent),
+                      ),
+                    ],
+                  ),
+                )
               : Text(
-            _tr.t('saved_texts'),
-            style: const TextStyle(
-              fontSize: AppTheme.fontLG,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.primary,
-            ),
-          ),
+                  _tr.t('saved_texts'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontLG,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                  ),
+                ),
         ),
-
-        // ── Cards ────────────────────────────────────────────────────────
         Expanded(
           child: displayed.isEmpty
               ? _buildNoResults()
               : ListView.builder(
-            padding: const EdgeInsets.only(bottom: 16),
-            itemCount: displayed.length,
-            itemBuilder: (ctx, i) {
-              final text = displayed[i];
-              return SavedTextCard(
-                savedText: text,
-                langCode: _currentLang,
-                onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ResultScreen(
-                        savedText: text,
-                        langCode: _currentLang,
-                        isNew: false,
-                      ),
-                    ),
-                  );
-                  setState(
-                          () => _currentLang = _dataService.getLanguage());
-                },
-                onDelete: () => _deleteText(text.id),
-                onEditName: () => _editTextName(text),
-              );
-            },
-          ),
+                  padding: const EdgeInsets.only(bottom: 16),
+                  itemCount: displayed.length,
+                  itemBuilder: (ctx, i) {
+                    final text = displayed[i];
+                    return SavedTextCard(
+                      savedText: text,
+                      langCode: _currentLang,
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ResultScreen(
+                              savedText: text,
+                              langCode: _currentLang,
+                              isNew: false,
+                            ),
+                          ),
+                        );
+                        setState(
+                            () => _currentLang = _dataService.getLanguage());
+                      },
+                      onDelete: () => _deleteText(text.id),
+                      onEditName: () => _editTextName(text),
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -980,7 +1100,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 size: 80, color: AppTheme.primary.withOpacity(0.20)),
             const SizedBox(height: 20),
             Text(
-              'No named entries match\n"$_searchQuery"',
+              '${_tr.t('home_no_named_entries')}\n"$_searchQuery"',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: AppTheme.fontSM,
@@ -989,8 +1109,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Only entries with a name are searched.\nTap the ✎ icon on a card to add a name.',
+            Text(
+              _tr.t('home_only_entries_with_name'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: AppTheme.fontXS,

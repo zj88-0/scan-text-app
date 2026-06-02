@@ -42,6 +42,11 @@ dependencies:
   # Text to speech
   flutter_tts: ^4.0.2
 
+  # Offline Hokkien TTS (Sherpa-ONNX)
+  sherpa_onnx: ^1.10.32
+  path_provider: ^2.1.0
+  audioplayers: ^6.0.0
+
   # Local storage
   shared_preferences: ^2.2.3
 
@@ -80,6 +85,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.7
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -92,7 +99,19 @@ dev_dependencies:
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/img/VisionAID_logo.png"
 
+flutter_native_splash:
+  color: "#F9F5DD"      # Main background color
+  image: assets/img/VisionAID_loading_Screen.png # Your app icon to show in the center
+
+  # Recommended for Android 12+ support
+  android_12:
+    color: "#F9F5DD"
+    image: assets/img/VisionAID_loading_Screen.png
 # The following section is specific to Flutter packages.
 flutter:
 
@@ -110,6 +129,13 @@ flutter:
     - assets/translations/zh.json
     - assets/translations/ms.json
     - assets/translations/ta.json
+    - assets/img/VisionAID_logo.png
+    - assets/img/VisionAID_loading_Screen.png
+    - assets/models/model.onnx
+    - assets/models/tokens.txt
+    - assets/models/lexicon.txt
+    - assets/models/date.fst
+    - assets/models/number.fst
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

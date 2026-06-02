@@ -1,5 +1,6 @@
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'translation_service.dart';
 
 /// Manages on-device translation using Google ML Kit.
 ///
@@ -106,65 +107,65 @@ class OnDeviceTranslationService {
   /// All supported languages with friendly display names.
   static const Map<String, String> allSupportedLanguages = {
     'af': 'Afrikaans',
-    'ar': 'Arabic',
-    'be': 'Belarusian',
-    'bg': 'Bulgarian',
-    'bn': 'Bengali',
-    'ca': 'Catalan',
-    'cs': 'Czech',
-    'cy': 'Welsh',
-    'da': 'Danish',
-    'de': 'German',
-    'el': 'Greek',
+    'ar': 'العربية',
+    'be': 'Беларуская',
+    'bg': 'Български',
+    'bn': 'বাংলা',
+    'ca': 'Català',
+    'cs': 'Čeština',
+    'cy': 'Cymraeg',
+    'da': 'Dansk',
+    'de': 'Deutsch',
+    'el': 'Ελληνικά',
     'en': 'English',
     'eo': 'Esperanto',
-    'es': 'Spanish',
-    'et': 'Estonian',
-    'fa': 'Persian',
-    'fi': 'Finnish',
-    'fr': 'French',
-    'ga': 'Irish',
-    'gl': 'Galician',
-    'gu': 'Gujarati',
-    'he': 'Hebrew',
-    'hi': 'Hindi',
-    'hr': 'Croatian',
-    'ht': 'Haitian Creole',
-    'hu': 'Hungarian',
-    'id': 'Indonesian',
-    'is': 'Icelandic',
-    'it': 'Italian',
-    'ja': 'Japanese',
-    'ka': 'Georgian',
-    'kn': 'Kannada',
-    'ko': 'Korean',
-    'lt': 'Lithuanian',
-    'lv': 'Latvian',
-    'mk': 'Macedonian',
-    'mr': 'Marathi',
-    'ms': 'Malay',
-    'mt': 'Maltese',
-    'nl': 'Dutch',
-    'no': 'Norwegian',
-    'pl': 'Polish',
-    'pt': 'Portuguese',
-    'ro': 'Romanian',
-    'ru': 'Russian',
-    'sk': 'Slovak',
-    'sl': 'Slovenian',
-    'sq': 'Albanian',
-    'sr': 'Serbian',
-    'sv': 'Swedish',
-    'sw': 'Swahili',
-    'ta': 'Tamil',
-    'te': 'Telugu',
-    'th': 'Thai',
+    'es': 'Español',
+    'et': 'Eesti',
+    'fa': 'فارسی',
+    'fi': 'Suomi',
+    'fr': 'Français',
+    'ga': 'Gaeilge',
+    'gl': 'Galego',
+    'gu': 'ગુજરાતી',
+    'he': 'עברית',
+    'hi': 'हिन्दी',
+    'hr': 'Hrvatski',
+    'ht': 'Kreyòl ayisyen',
+    'hu': 'Magyar',
+    'id': 'Bahasa Indonesia',
+    'is': 'Íslenska',
+    'it': 'Italiano',
+    'ja': '日本語',
+    'ka': 'ქართული',
+    'kn': 'ಕನ್ನಡ',
+    'ko': '한국어',
+    'lt': 'Lietuvių',
+    'lv': 'Latviešu',
+    'mk': 'Македонски',
+    'mr': 'मराठी',
+    'ms': 'Bahasa Melayu',
+    'mt': 'Malti',
+    'nl': 'Nederlands',
+    'no': 'Norsk',
+    'pl': 'Polski',
+    'pt': 'Português',
+    'ro': 'Română',
+    'ru': 'Русский',
+    'sk': 'Slovenčina',
+    'sl': 'Slovenščina',
+    'sq': 'Shqip',
+    'sr': 'Српски',
+    'sv': 'Svenska',
+    'sw': 'Kiswahili',
+    'ta': 'தமிழ்',
+    'te': 'తెలుగు',
+    'th': 'ไทย',
     'tl': 'Filipino',
-    'tr': 'Turkish',
-    'uk': 'Ukrainian',
-    'ur': 'Urdu',
-    'vi': 'Vietnamese',
-    'zh': 'Chinese',
+    'tr': 'Türkçe',
+    'uk': 'Українська',
+    'ur': 'اردو',
+    'vi': 'Tiếng Việt',
+    'zh': '中文',
   };
 
   // ── In-memory state ───────────────────────────────────────────────────────
@@ -213,6 +214,21 @@ class OnDeviceTranslationService {
     await prefs.setStringList(_everDownloadedKey, _everDownloaded.toList());
   }
 
+  /// Batch marks codes as ever-downloaded and persists the registry once.
+  Future<void> _markEverDownloadedBatch(List<String> codes) async {
+    bool changed = false;
+    for (final code in codes) {
+      if (!_everDownloaded.contains(code)) {
+        _everDownloaded.add(code);
+        changed = true;
+      }
+    }
+    if (changed) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_everDownloadedKey, _everDownloaded.toList());
+    }
+  }
+
   /// Removes [langCode] from the ever-downloaded registry.
   /// Call this when the user explicitly deletes a model via Settings,
   /// so the splash screen knows it is truly gone and must be re-downloaded
@@ -245,12 +261,12 @@ class OnDeviceTranslationService {
 
   /// Downloads the model for [langCode], marks it in the ever-downloaded
   /// registry on success, and returns true/false.
-  Future<bool> downloadModel(String langCode) async {
+  Future<bool> downloadModel(String langCode, {bool skipRegistry = false}) async {
     try {
       final bcp = _bcpCode(langCode);
       await _modelManager.downloadModel(bcp, isWifiRequired: false);
       final ok = await _modelManager.isModelDownloaded(bcp);
-      if (ok) await _markEverDownloaded(langCode);
+      if (ok && !skipRegistry) await _markEverDownloaded(langCode);
       return ok;
     } catch (_) {
       return false;
@@ -297,11 +313,19 @@ class OnDeviceTranslationService {
     if (missing.isEmpty) return;
 
     int completed = 0;
+    final downloadedCodes = <String>[];
+    
     await Future.wait(missing.map((code) async {
-      await downloadModel(code);
+      final ok = await downloadModel(code, skipRegistry: true);
+      if (ok) downloadedCodes.add(code);
+      
       completed++;
       onProgress?.call(code, completed, missing.length);
     }));
+
+    if (downloadedCodes.isNotEmpty) {
+      await _markEverDownloadedBatch(downloadedCodes);
+    }
   }
 
   /// Silently kick off background downloads for configured (non-default) languages.
@@ -330,9 +354,16 @@ class OnDeviceTranslationService {
       return results;
     }
 
-    for (final code in _configuredLanguages) {
-      results[code] = await _translateOne(text, code);
+    final futures = _configuredLanguages.map((code) async {
+      final translated = await _translateOne(text, code);
+      return MapEntry(code, translated);
+    });
+    
+    final entries = await Future.wait(futures);
+    for (final entry in entries) {
+      results[entry.key] = entry.value;
     }
+    
     return results;
   }
 
@@ -345,6 +376,8 @@ class OnDeviceTranslationService {
   }
 
   Future<String> _translateOne(String text, String targetCode) async {
+    if (targetCode == 'en') return text;
+    
     final targetLang = _toMlKitLang(targetCode);
     if (targetLang == null) return text;
 
@@ -366,6 +399,156 @@ class OnDeviceTranslationService {
     }
   }
 
+  /// Batch translate UI strings (e.g. from en.json) to the target language.
+  /// Skips translation for 'app_name' and empty strings.
+  Future<Map<String, String>> translateUIStrings(Map<String, String> sourceMap, String targetCode) async {
+    if (targetCode == 'en') return sourceMap;
+
+    final targetLang = _toMlKitLang(targetCode);
+    if (targetLang == null) return sourceMap;
+
+    if (!await isModelDownloaded(targetCode)) {
+      final ok = await downloadModel(targetCode);
+      if (!ok) throw Exception('Model failed to download for $targetCode');
+    }
+
+    final translator = OnDeviceTranslator(
+      sourceLanguage: TranslateLanguage.english,
+      targetLanguage: targetLang,
+    );
+
+    final resultMap = <String, String>{};
+    try {
+      final entriesToTranslate = sourceMap.entries
+          .where((e) => e.key != 'app_name' && e.value.isNotEmpty)
+          .toList();
+
+      // ── First pass: translate in concurrent batches of 30 ────────────────
+      const int batchSize = 30;
+      for (int i = 0; i < entriesToTranslate.length; i += batchSize) {
+        final batch = entriesToTranslate.skip(i).take(batchSize);
+        await Future.wait(batch.map((entry) async {
+          try {
+            final translated = await _robustTranslate(translator, entry.value);
+            resultMap[entry.key] = translated.trim().isNotEmpty ? translated : entry.value;
+          } catch (_) {
+            resultMap[entry.key] = entry.value;
+          }
+        }));
+      }
+
+      // ── Second pass: retry any entry still identical to English source ────
+      // Some ML Kit language models (notably Japanese) silently return the
+      // input unchanged for short lowercase noun-phrases. Detect these and
+      // retry with a forced full-sentence frame that anchors the engine.
+      final failedEntries = entriesToTranslate
+          .where((e) => resultMap[e.key] == e.value)
+          .toList();
+
+      if (failedEntries.isNotEmpty) {
+        await Future.wait(failedEntries.map((entry) async {
+          try {
+            final retried = await _sentenceFrameTranslate(translator, entry.value);
+            if (retried.trim().isNotEmpty && retried != entry.value) {
+              resultMap[entry.key] = retried;
+            }
+          } catch (_) {
+            // Keep the original fallback already in resultMap
+          }
+        }));
+      }
+
+      // ── Copy through skipped keys (app_name, empty) ──────────────────────
+      for (final entry in sourceMap.entries) {
+        if (entry.key == 'app_name' || entry.value.isEmpty) {
+          resultMap[entry.key] = entry.value;
+        }
+      }
+
+      return resultMap;
+    } finally {
+      translator.close();
+    }
+  }
+
+  /// Standard robust translation with four escalating strategies.
+  Future<String> _robustTranslate(OnDeviceTranslator translator, String text) async {
+    // Strategy 1 — plain translation.
+    String t = await translator.translateText(text);
+    if (t.trim().isNotEmpty && t != text) return t;
+
+    // Strategy 2 — strip trailing punctuation (helps some models).
+    if (text.length < 50) {
+      final stripped = text.replaceAll(RegExp(r'[.?!]'), '').trim();
+      if (stripped.isNotEmpty && stripped != text) {
+        t = await translator.translateText(stripped);
+        if (t.trim().isNotEmpty && t != stripped) return t;
+      }
+    }
+
+    // Strategy 3 — sentence-case (helps when model expects a capital).
+    if (text.isNotEmpty) {
+      final firstChar = text[0];
+      if (firstChar.toLowerCase() == firstChar && firstChar.toUpperCase() != firstChar) {
+        final sentenceCase = text[0].toUpperCase() + text.substring(1);
+        t = await translator.translateText(sentenceCase);
+        if (t.trim().isNotEmpty && t != sentenceCase) return t;
+      }
+    }
+
+    // Strategy 4 — context-prefix ("Note: …").
+    // Japanese (and a few other models) silently skip short lowercase noun-
+    // phrases. Wrapping with a neutral prefix forces the model to parse the
+    // phrase as part of a real sentence.
+    final prefixed = 'Note: $text';
+    t = await translator.translateText(prefixed);
+    if (t.trim().isNotEmpty && t != prefixed) {
+      // Strip any translated version of the prefix (keep only the payload).
+      final colonIdx = t.indexOf(':');
+      if (colonIdx != -1 && colonIdx < t.length - 1) {
+        return t.substring(colonIdx + 1).trim();
+      }
+      return t.trim();
+    }
+
+    // Strategy 5 — trailing dot (last resort).
+    final dotted = '$text.';
+    t = await translator.translateText(dotted);
+    if (t.trim().isNotEmpty && t != dotted) {
+      return t.endsWith('.') ? t.substring(0, t.length - 1).trim() : t;
+    }
+
+    return text; // give up — keep English
+  }
+
+  /// Second-pass retry for strings that returned unchanged after _robustTranslate.
+  /// Uses a full declarative sentence frame to force the model to translate.
+  Future<String> _sentenceFrameTranslate(OnDeviceTranslator translator, String text) async {
+    // Wrap in a grammatical frame: "The message reads: <text>."
+    final framed = 'The message reads: $text.';
+    String t = await translator.translateText(framed);
+
+    if (t.trim().isNotEmpty && t != framed) {
+      // Strip the translated frame — keep only the payload after the last colon.
+      final colonIdx = t.lastIndexOf(':');
+      if (colonIdx != -1 && colonIdx < t.length - 1) {
+        final payload = t.substring(colonIdx + 1).trim();
+        // Remove trailing period that we injected.
+        return payload.endsWith('.') ? payload.substring(0, payload.length - 1).trim() : payload;
+      }
+      return t.trim();
+    }
+
+    // Plain sentence fallback.
+    final plain = '${text[0].toUpperCase()}${text.substring(1)}.';
+    t = await translator.translateText(plain);
+    if (t.trim().isNotEmpty && t != plain) {
+      return t.endsWith('.') ? t.substring(0, t.length - 1).trim() : t;
+    }
+
+    return text; // still unchanged — keep English
+  }
+
   // ── Status helpers ────────────────────────────────────────────────────────
 
   Future<Map<String, bool>> getDownloadStatus() async {
@@ -376,6 +559,8 @@ class OnDeviceTranslationService {
     return status;
   }
 
-  String displayName(String code) =>
-      allSupportedLanguages[code] ?? code.toUpperCase();
+  /// Returns the native display name of a language code.
+  String displayName(String code) {
+    return allSupportedLanguages[code] ?? code.toUpperCase();
+  }
 }
