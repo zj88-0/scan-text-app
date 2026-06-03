@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../app_theme.dart';
 import '../models/saved_text.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
+import '../services/local_ocr_service.dart';
 import '../services/mlkit_translation_service.dart';
 import '../services/premium_service.dart';
 import '../services/translation_service.dart';
@@ -35,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final AppTranslations _tr = AppTranslations();
   final OnDeviceTranslationService _mlkit = OnDeviceTranslationService();
   final PremiumService _premium = PremiumService();
+  final LocalOcrService _localOcr = LocalOcrService();
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -53,6 +56,11 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Guest helper ──────────────────────────────────────────────────────────
 
   bool get _isGuest => FirebaseAuth.instance.currentUser?.isAnonymous ?? false;
+
+  // ── Scan mode helper ──────────────────────────────────────────────────────
+
+  /// Returns true when the user has chosen the local (offline) scan mode.
+  bool get _useLocalScan => _dataService.getScanMode() == 'local';
 
   @override
   void initState() {
@@ -116,9 +124,15 @@ class _HomeScreenState extends State<HomeScreen> {
     return _dataService.getFreeScanCount() < _freeDailyLimit;
   }
 
-  /// Shows the limit dialog. For guest users it also offers to sign in.
-  /// For free (logged-in) users it offers to upgrade.
-  void _showScanLimitDialog() {
+  /// Shows the limit dialog when the daily AI-scan quota is exhausted.
+  ///
+  /// - Guest users: offer to sign in OR continue with the free local scan.
+  /// - Free (logged-in) users: offer to upgrade OR continue with the free
+  ///   local scan.
+  ///
+  /// [source] is forwarded to [_pickImage] if the user chooses to continue
+  /// with the local scan (so we know which camera/gallery to open).
+  void _showScanLimitDialog({ImageSource? source}) {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -151,15 +165,17 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        content: Text(
-          _isGuest
-              ? _tr.t('home_daily_limit_guest')
-              : _tr.t('home_daily_limit_free'),
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: AppTheme.fontSM,
-            color: AppTheme.textDark,
-            height: 1.6,
+        content: SingleChildScrollView(
+          child: Text(
+            _isGuest
+                ? _tr.t('home_daily_limit_guest')
+                : _tr.t('home_daily_limit_free'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: AppTheme.fontSM,
+              color: AppTheme.textDark,
+              height: 1.6,
+            ),
           ),
         ),
         actions: [
@@ -185,6 +201,29 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 10),
+            // Secondary: Continue with free local scan
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                if (source != null) {
+                  await _pickImageWithLocalOcr(source);
+                }
+              },
+              icon: const Icon(Icons.phone_android_rounded, size: 22),
+              label: Text(
+                _tr.t('home_continue_free_scan'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primary,
+                side: const BorderSide(color: AppTheme.primary, width: 1.5),
+                minimumSize: const Size(double.infinity, 56),
+              ),
+            ),
+            const SizedBox(height: 4),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               style: TextButton.styleFrom(
@@ -223,6 +262,29 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 10),
+            // Secondary: Continue with free local scan
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                if (source != null) {
+                  await _pickImageWithLocalOcr(source);
+                }
+              },
+              icon: const Icon(Icons.phone_android_rounded, size: 22),
+              label: Text(
+                _tr.t('home_continue_free_scan'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontSM,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primary,
+                side: const BorderSide(color: AppTheme.primary, width: 1.5),
+                minimumSize: const Size(double.infinity, 56),
+              ),
+            ),
+            const SizedBox(height: 4),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               style: TextButton.styleFrom(
@@ -328,9 +390,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Image helpers ─────────────────────────────────────────────────────────
 
+  /// Main entry point when the user taps Camera or Gallery.
+  /// Routes to the local OCR path or the AI path depending on the user's
+  /// setting.  If the AI scan quota is exhausted the limit dialog is shown.
   Future<void> _pickImage(ImageSource source) async {
+    // If the user has explicitly chosen local scan in Settings, bypass the
+    // AI quota check entirely.
+    if (_useLocalScan) {
+      await _pickImageWithLocalOcr(source);
+      return;
+    }
+
+    // Check internet connection; if offline, auto-fallback to local scan.
+    final netResults = await Connectivity().checkConnectivity();
+    if (netResults.contains(ConnectivityResult.none) || netResults.isEmpty) {
+      await _pickImageWithLocalOcr(source);
+      return;
+    }
+
+    // AI mode: enforce daily limit.
     if (!_canScan()) {
-      _showScanLimitDialog();
+      _showScanLimitDialog(source: source);
       return;
     }
 
@@ -342,7 +422,24 @@ class _HomeScreenState extends State<HomeScreen> {
         maxHeight: 2048,
       );
       if (picked == null) return;
-      await _processImage(File(picked.path));
+      await _processImage(File(picked.path), useLocalOcr: false);
+    } catch (e) {
+      _showError(_tr.t('error_generic'));
+    }
+  }
+
+  /// Picks an image and processes it using the offline ML Kit OCR.
+  /// Does NOT count against the AI daily quota.
+  Future<void> _pickImageWithLocalOcr(ImageSource source) async {
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 90,
+        maxWidth: 2048,
+        maxHeight: 2048,
+      );
+      if (picked == null) return;
+      await _processImage(File(picked.path), useLocalOcr: true);
     } catch (e) {
       _showError(_tr.t('error_generic'));
     }
@@ -384,49 +481,93 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _processImage(File imageFile) async {
+  Future<void> _processImage(File imageFile, {bool useLocalOcr = false}) async {
     setState(() {
       _loading = true;
       _loadingStep = _tr.t('processing');
     });
 
     try {
-      setState(() => _loadingStep = _tr.t('home_checking_size'));
-      final imageInfo = await _getOptimizedImage(imageFile);
+      String originalText;
 
-      File fileToSend = imageFile;
-      if (imageInfo.compressedKb != null) {
-        final tempDir =
-            await Directory.systemTemp.createTemp('ocr_compressed_');
-        final tempFile = File('${tempDir.path}/compressed.jpg');
-        await tempFile.writeAsBytes(imageInfo.bytes);
-        fileToSend = tempFile;
-      }
+      if (useLocalOcr) {
+        // ── Offline ML Kit path ───────────────────────────────────────────
+        setState(() => _loadingStep = _tr.t('home_local_scan_reading'));
+        originalText = await _localOcr.recognize(imageFile);
+      } else {
+        // ── AI / remote server path ───────────────────────────────────────
+        setState(() => _loadingStep = _tr.t('home_checking_size'));
+        final imageInfo = await _getOptimizedImage(imageFile);
 
-      setState(() => _loadingStep = _tr.t('processing'));
-      final originalText = await _apiService.processImage(fileToSend);
+        File fileToSend = imageFile;
+        if (imageInfo.compressedKb != null) {
+          final tempDir =
+              await Directory.systemTemp.createTemp('ocr_compressed_');
+          final tempFile = File('${tempDir.path}/compressed.jpg');
+          await tempFile.writeAsBytes(imageInfo.bytes);
+          fileToSend = tempFile;
+        }
 
-      if (originalText.trim().isEmpty) {
+        setState(() => _loadingStep = _tr.t('processing'));
+        originalText = await _apiService.processImage(fileToSend);
+
+        // Only increment the AI quota counter for non-local scans.
+        if (_premium.isFree) {
+          await _dataService.incrementFreeScanCount();
+        }
+
+        if (originalText.trim().isEmpty) {
+          setState(() => _loading = false);
+          _showError(_tr.t('error_generic'));
+          return;
+        }
+
+        Map<String, String> translations = {};
+        if (_premium.isFree) {
+          setState(() => _loadingStep = _tr.t('home_translating'));
+          translations = await _mlkit.translateToAllConfigured(originalText);
+        } else {
+          translations = {'en': originalText};
+        }
+
+        if (!mounted) return;
         setState(() => _loading = false);
-        _showError(_tr.t('error_generic'));
+
+        final result = SavedText(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          userId: AuthService().currentUser?.uid ?? '',
+          originalText: originalText,
+          translations: Map<String, String>.from(translations),
+          createdAt: DateTime.now(),
+        );
+
+        final saved = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResultScreen(
+              savedText: result,
+              langCode: _currentLang,
+              isNew: true,
+              imageSizeInfo: imageInfo,
+            ),
+          ),
+        );
+
+        if (saved == true) await _loadSavedTexts();
         return;
       }
 
-      if (_premium.isFree) {
-        await _dataService.incrementFreeScanCount();
+      // ── Shared tail for local OCR path ────────────────────────────────────
+      if (originalText.trim().isEmpty) {
+        setState(() => _loading = false);
+        _showError(_tr.t('error_no_text'));
+        return;
       }
 
-      Map<String, String> translations = {};
-
-      if (_premium.isFree) {
-        setState(() => _loadingStep = _tr.t('home_translating'));
-        translations = await _mlkit.translateToAllConfigured(originalText);
-      } else {
-        translations = {'en': originalText};
-      }
+      setState(() => _loadingStep = _tr.t('home_translating'));
+      final translations = await _mlkit.translateToAllConfigured(originalText);
 
       if (!mounted) return;
-
       setState(() => _loading = false);
 
       final result = SavedText(
@@ -437,6 +578,7 @@ class _HomeScreenState extends State<HomeScreen> {
         createdAt: DateTime.now(),
       );
 
+      // Local-scan results don't have an imageInfo compression report.
       final saved = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
@@ -444,7 +586,6 @@ class _HomeScreenState extends State<HomeScreen> {
             savedText: result,
             langCode: _currentLang,
             isNew: true,
-            imageSizeInfo: imageInfo,
           ),
         ),
       );

@@ -133,7 +133,7 @@ class SavedTextCard extends StatelessWidget {
                         color: AppTheme.primary.withOpacity(0.7),
                         fontWeight: FontWeight.w500,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),

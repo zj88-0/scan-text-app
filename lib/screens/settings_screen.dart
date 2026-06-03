@@ -90,6 +90,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Whether the initial parallel status check is still running.
   bool _statusLoading = true;
 
+  // Scan mode: 'ai' or 'local'
+  String _scanMode = 'ai';
+
   static const int _maxActive = 4;
   static const int _freeDailyLimit = 3;
 
@@ -98,6 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _configuredLanguages = List.from(_mlkit.configuredLanguages);
     _activeLanguages = List.from(_mlkit.configuredLanguages);
+    _scanMode = _dataService.getScanMode();
     _refreshDownloadStatus();
   }
 
@@ -360,6 +364,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 12),
             _buildDailyScansCard(),
 
+            const SizedBox(height: 20),
+
+            // ── Scan Mode ───────────────────────────────────────────────
+            _sectionTitle(
+                Icons.settings_input_antenna_rounded,
+                _tr.t('settings_scan_mode')),
+            const SizedBox(height: 12),
+            _buildScanModeCard(),
+
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 24),
@@ -460,6 +473,194 @@ class _SettingsScreenState extends State<SettingsScreen> {
               fontSize: AppTheme.fontSM,
               color: AppTheme.textMedium,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Scan mode card ────────────────────────────────────────────────────────
+
+  Widget _buildScanModeCard() {
+    final isAi = _scanMode == 'ai';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _tr.t('settings_scan_mode_desc'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontXS,
+              color: AppTheme.textMedium,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              // ── AI Scan tile ─────────────────────────────────────────────
+              Expanded(
+                child: GestureDetector(
+                  onTap: () async {
+                    await _dataService.setScanMode('ai');
+                    setState(() => _scanMode = 'ai');
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14, horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: isAi
+                          ? AppTheme.primary
+                          : AppTheme.primary.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isAi
+                            ? AppTheme.primary
+                            : AppTheme.primary.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.cloud_rounded,
+                          size: 28,
+                          color: isAi ? Colors.white : AppTheme.primary,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _tr.t('settings_scan_mode_ai'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontXS,
+                            fontWeight: FontWeight.bold,
+                            color: isAi ? Colors.white : AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _tr.t('settings_scan_mode_ai_sub'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontXS - 1,
+                            color: isAi
+                                ? Colors.white.withOpacity(0.8)
+                                : AppTheme.textLight,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (isAi) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _tr.t('upgrade_active'),
+                              style: const TextStyle(
+                                fontSize: AppTheme.fontXS,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // ── Local Scan tile ──────────────────────────────────────────
+              Expanded(
+                child: GestureDetector(
+                  onTap: () async {
+                    await _dataService.setScanMode('local');
+                    setState(() => _scanMode = 'local');
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14, horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: !isAi
+                          ? AppTheme.accent
+                          : AppTheme.accent.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: !isAi
+                            ? AppTheme.accent
+                            : AppTheme.accent.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.phone_android_rounded,
+                          size: 28,
+                          color: !isAi ? Colors.white : AppTheme.accent,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _tr.t('settings_scan_mode_local'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontXS,
+                            fontWeight: FontWeight.bold,
+                            color: !isAi ? Colors.white : AppTheme.accent,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _tr.t('settings_scan_mode_local_sub'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontXS - 1,
+                            color: !isAi
+                                ? Colors.white.withOpacity(0.8)
+                                : AppTheme.textLight,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (!isAi) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _tr.t('upgrade_active'),
+                              style: const TextStyle(
+                                fontSize: AppTheme.fontXS,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

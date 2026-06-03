@@ -39,6 +39,11 @@ class DataService {
   static const String _voiceLocalePrefix = 'voice_locale_';
   static const String _chineseDialectKey = 'chinese_dialect';
 
+  // ── Scan mode preference ──────────────────────────────────────────────────
+  // 'ai'    → use the remote AI/server OCR (default)
+  // 'local' → use on-device ML Kit OCR (offline)
+  static const String _scanModeKey = 'scan_mode';
+
   // ── Logged-in user scan-count cache keys (mirrors Firestore after sync) ──
   static const String _scanCountKey     = 'free_scan_count';
   static const String _scanCountDateKey = 'free_scan_count_date';
@@ -156,6 +161,16 @@ class DataService {
 
   Future<void> setLanguage(String langCode) async {
     await _p.setString(_languageKey, langCode);
+  }
+
+  // ── Scan Mode ─────────────────────────────────────────────────────────────
+
+  /// Returns 'ai' (default) or 'local'.
+  String getScanMode() => _p.getString(_scanModeKey) ?? 'ai';
+
+  Future<void> setScanMode(String mode) async {
+    assert(mode == 'ai' || mode == 'local');
+    await _p.setString(_scanModeKey, mode);
   }
 
   // ── Font Size ─────────────────────────────────────────────────────────────

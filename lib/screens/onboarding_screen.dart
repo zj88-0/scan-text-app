@@ -154,81 +154,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
                   const SizedBox(height: 28),
 
+                  // ── App Info Tile ─────────────────────────────────────────
                   _buildSection(
-                    icon: Icons.copyright_rounded,
-                    iconColor: AppTheme.danger,
-                    title: _tr.t('terms_sec8_title'),
-                    body: _tr.t('terms_sec8_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 1 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.translate_rounded,
-                    iconColor: AppTheme.accent,
-                    title: _tr.t('terms_sec1_title'),
-                    body: _tr.t('terms_sec1_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 2 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.privacy_tip_rounded,
-                    iconColor: AppTheme.success,
-                    title: _tr.t('terms_sec2_title'),
-                    body: _tr.t('terms_sec2_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 3 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.image_not_supported_rounded,
+                    icon: Icons.info_outline_rounded,
                     iconColor: AppTheme.primary,
-                    title: _tr.t('terms_sec3_title'),
-                    body: _tr.t('terms_sec3_body'),
+                    title: _tr.t('terms_app_info_title'),
+                    body: _tr.t('terms_app_info_body'),
                   ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // ── Section 4 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.privacy_tip_rounded,
-                    iconColor: AppTheme.success,
-                    title: _tr.t('terms_sec4_title'),
-                    body: _tr.t('terms_sec4_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 5 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.account_circle_rounded,
-                    iconColor: AppTheme.accent,
-                    title: _tr.t('terms_sec5_title'),
-                    body: _tr.t('terms_sec5_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 6 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.update_rounded,
-                    iconColor: AppTheme.primary,
-                    title: _tr.t('terms_sec6_title'),
-                    body: _tr.t('terms_sec6_body'),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Section 7 ─────────────────────────────────────────
-                  _buildSection(
-                    icon: Icons.shield_rounded,
-                    iconColor: AppTheme.success,
-                    title: _tr.t('terms_sec7_title'),
-                    body: _tr.t('terms_sec7_body'),
+                  // ── Full Terms Link ─────────────────────────────────────
+                  OutlinedButton.icon(
+                    onPressed: () => _showFullTermsDialog(context),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                    label: Text(_tr.t('terms_view_full')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary, width: 1.5),
+                      minimumSize: const Size(double.infinity, 56),
+                    ),
                   ),
 
                   const SizedBox(height: 12),
@@ -341,6 +286,113 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showFullTermsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _tr.t('terms_view_full'),
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontLG,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _buildSection(
+                      icon: Icons.copyright_rounded,
+                      iconColor: AppTheme.danger,
+                      title: _tr.t('terms_copyright_title'),
+                      body: _tr.t('terms_copyright_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.translate_rounded,
+                      iconColor: AppTheme.accent,
+                      title: _tr.t('terms_sec1_title'),
+                      body: _tr.t('terms_sec1_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.privacy_tip_rounded,
+                      iconColor: AppTheme.success,
+                      title: _tr.t('terms_sec2_title'),
+                      body: _tr.t('terms_sec2_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.image_not_supported_rounded,
+                      iconColor: AppTheme.primary,
+                      title: _tr.t('terms_sec3_title'),
+                      body: _tr.t('terms_sec3_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.privacy_tip_rounded,
+                      iconColor: AppTheme.success,
+                      title: _tr.t('terms_sec4_title'),
+                      body: _tr.t('terms_sec4_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.account_circle_rounded,
+                      iconColor: AppTheme.accent,
+                      title: _tr.t('terms_sec5_title'),
+                      body: _tr.t('terms_sec5_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.update_rounded,
+                      iconColor: AppTheme.primary,
+                      title: _tr.t('terms_sec6_title'),
+                      body: _tr.t('terms_sec6_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.shield_rounded,
+                      iconColor: AppTheme.success,
+                      title: _tr.t('terms_sec7_title'),
+                      body: _tr.t('terms_sec7_body'),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSection(
+                      icon: Icons.offline_bolt_rounded,
+                      iconColor: AppTheme.primary,
+                      title: _tr.t('terms_sec8_title'),
+                      body: _tr.t('terms_sec8_body'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

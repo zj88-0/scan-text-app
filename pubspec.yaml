@@ -62,6 +62,9 @@ dependencies:
   # On-device ML Kit translation
   google_mlkit_translation: ^0.11.0
 
+  # On-device ML Kit OCR (offline text recognition)
+  google_mlkit_text_recognition: ^0.13.0
+
   connectivity_plus: ^6.0.0
 
   firebase_core: ^4.7.0
