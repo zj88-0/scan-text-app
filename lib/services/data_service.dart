@@ -312,6 +312,30 @@ class DataService {
     }
   }
 
+  /// Decrements the daily scan counter by 1 (minimum 0).
+  /// Used when the user earns a reward via a rewarded video ad.
+  /// Only updates the local SharedPreferences cache; the next remote sync
+  /// will reconcile any drift for logged-in users.
+  Future<void> decrementFreeScanCount() async {
+    if (_isGuest) {
+      final today     = _todayKey();
+      final savedDate = _p.getString(_guestScanCountDateKey) ?? '';
+      final current   = (savedDate == today) ? (_p.getInt(_guestScanCountKey) ?? 0) : 0;
+      final next      = (current - 1).clamp(0, current);
+      await _p.setInt(_guestScanCountKey, next);
+      await _p.setString(_guestScanCountDateKey, today);
+      debugPrint('[DataService] guest decrementFreeScanCount → $next');
+    } else {
+      final today     = _todayKey();
+      final savedDate = _p.getString(_scanCountDateKey) ?? '';
+      final current   = (savedDate == today) ? (_p.getInt(_scanCountKey) ?? 0) : 0;
+      final next      = (current - 1).clamp(0, current);
+      await _p.setInt(_scanCountKey, next);
+      await _p.setString(_scanCountDateKey, today);
+      debugPrint('[DataService] decrementFreeScanCount → $next');
+    }
+  }
+
   // ── Guest scan-count implementation ───────────────────────────────────────
   //
   // Uses a fixed device-level key so the count persists across all

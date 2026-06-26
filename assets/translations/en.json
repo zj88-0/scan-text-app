@@ -1,4 +1,4 @@
-﻿{
+{
   "app_name": "VisionAID",
   "home_title": "VISIONAID",
   "take_photo": "Take Photo",
@@ -364,5 +364,8 @@
   "feedback_q3": "Any improvement needed?",
   "feedback_optional": "(Optional)",
   "feedback_q3_hint": "Tell us what we can do better...",
-  "feedback_submit": "Submit Feedback"
+  "feedback_submit": "Submit Feedback",
+  "home_watch_ad": "Watch a Video to Scan",
+  "home_ad_not_ready": "Ad not ready yet",
+  "home_ad_reward_granted": "Starting translation..."
 }

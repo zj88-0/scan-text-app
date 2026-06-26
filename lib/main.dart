@@ -16,6 +16,7 @@ import 'services/tts_service.dart';
 import 'services/wifi_check_service.dart';
 import 'services/auth_service.dart';
 import 'screens/login_screen.dart';
+import 'services/ad_service.dart';
 import 'widgets/global_language_icon.dart';
 import 'widgets/language_selection_helper.dart';
 
@@ -39,6 +40,10 @@ void main() async {
   await TtsService().init();
   await OnDeviceTranslationService().init();
   await PremiumService().init();
+
+  // Initialise AdMob SDK early so banner ads load as soon as the home screen
+  // is displayed. This is the recommended approach per AdMob documentation.
+  unawaited(AdService().initialize());
 
   runApp(const ElderlyReaderApp());
 }

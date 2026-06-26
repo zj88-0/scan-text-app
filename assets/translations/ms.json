@@ -364,5 +364,8 @@
   "lang_download_wait": "Ini mungkin mengambil masa. Sila tunggu.",
   "lang_download_failed": "Muat turun gagal. Sila periksa sambungan anda dan cuba lagi.",
   "result_offline_banner": "Tiada sambungan internet · Menggunakan terjemahan luar talian",
-  "zoom_label": "Zum"
+  "zoom_label": "Zum",
+  "home_watch_ad": "Tonton Video untuk Imbas",
+  "home_ad_not_ready": "Iklan belum sedia",
+  "home_ad_reward_granted": "Memulakan terjemahan..."
 }

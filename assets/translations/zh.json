@@ -364,5 +364,8 @@
   "lang_download_wait": "这可能需要一点时间，请稍候。",
   "lang_download_failed": "下载失败。请检查您的网络连接并重试。",
   "result_offline_banner": "无网络连接 · 正在使用离线翻译",
-  "zoom_label": "缩放"
+  "zoom_label": "缩放",
+  "home_watch_ad": "看视频开始扫描",
+  "home_ad_not_ready": "广告尚未准备好",
+  "home_ad_reward_granted": "正在开始翻译..."
 }

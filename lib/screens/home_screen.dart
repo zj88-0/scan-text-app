@@ -8,6 +8,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../app_theme.dart';
 import '../models/saved_text.dart';
+import '../services/ad_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
@@ -80,6 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadSavedTexts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initCamera();
+      // Pre-load the rewarded ad so it is ready when the limit dialog shows.
+      AdService().preload();
     });
   }
 
@@ -161,180 +164,82 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Shows the limit dialog when the daily AI-scan quota is exhausted.
   ///
-  /// - Guest users: offer to sign in OR continue with the free local scan.
-  /// - Free (logged-in) users: offer to upgrade OR continue with the free
-  ///   local scan.
-  ///
-  /// [source] is forwarded to [_pickImage] if the user chooses to continue
-  /// with the local scan (so we know which camera/gallery to open).
+  /// Three actions are always available:
+  ///   1. Watch a rewarded video ad → grants +1 scan
+  ///   2. Continue with free offline scan
+  ///   3. Cancel
   void _showScanLimitDialog({ImageSource? source}) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
-        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        title: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.accent.withOpacity(0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.document_scanner_rounded,
-                size: 48,
-                color: AppTheme.accent,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _tr.t('home_daily_limit_title'),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: AppTheme.fontLG,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Text(
-            _isGuest
-                ? _tr.t('home_daily_limit_guest')
-                : _tr.t('home_daily_limit_free'),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: AppTheme.fontSM,
-              color: AppTheme.textDark,
-              height: 1.6,
-            ),
-          ),
-        ),
-        actions: [
-          if (_isGuest) ...[
-            // Primary: Sign In / Create Account
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await AuthService().signOut(); // signs out anonymous user
-                // AppRoot listens to authStateChanges → will show LoginScreen
-              },
-              icon: const Icon(Icons.login_rounded, size: 24),
-              label: Text(
-                _tr.t('home_sign_in_create'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontSM,
-                  fontWeight: FontWeight.bold,
+      builder: (ctx) => _ScanLimitDialog(
+        isGuest: _isGuest,
+        translations: _tr,
+        onWatchAd: () async {
+          // Dialog closes itself inside the callback
+          if (!AdService().isRewardedAdReady) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(_tr.t('home_ad_not_ready')),
+                  duration: const Duration(seconds: 2),
                 ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                minimumSize: const Size(double.infinity, 64),
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Secondary: Continue with free local scan
-            OutlinedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                if (_selectedImage != null) {
-                  await _processImage(_selectedImage!, useLocalOcr: true);
-                }
-              },
-              icon: const Icon(Icons.phone_android_rounded, size: 22),
-              label: Text(
-                _tr.t('home_continue_free_scan'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontSM,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primary,
-                side: const BorderSide(color: AppTheme.primary, width: 1.5),
-                minimumSize: const Size(double.infinity, 56),
-              ),
-            ),
-            const SizedBox(height: 4),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              style: TextButton.styleFrom(
-                minimumSize: const Size(double.infinity, 52),
-              ),
-              child: Text(
-                _tr.t('home_maybe_later'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontXS,
-                  color: AppTheme.textMedium,
-                ),
-              ),
-            ),
-          ] else ...[
-            // Primary: Upgrade to Premium
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
-                );
+              );
+            }
+            return;
+          }
+          Navigator.pop(ctx);
+          AdService().showRewardedAd(
+            onRewarded: () async {
+              await _dataService.decrementFreeScanCount();
+              if (mounted) {
                 setState(() {});
-              },
-              icon: const Icon(Icons.auto_awesome_rounded, size: 22),
-              label: Text(
-                _tr.t('home_upgrade_premium'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontSM,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accent,
-                minimumSize: const Size(double.infinity, 64),
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Secondary: Continue with free local scan
-            OutlinedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                if (_selectedImage != null) {
-                  await _processImage(_selectedImage!, useLocalOcr: true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_tr.t('home_ad_reward_granted')),
+                    backgroundColor: AppTheme.success,
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+                
+                // Automatically proceed with the scan now that they have a free scan
+                if (source != null) {
+                  try {
+                    final picked = await _picker.pickImage(
+                      source: source,
+                      imageQuality: 90,
+                      maxWidth: 2048,
+                      maxHeight: 2048,
+                    );
+                    if (picked != null && mounted) {
+                      await _processImage(File(picked.path), useLocalOcr: false);
+                    }
+                  } catch (e) {
+                    if (mounted) _showError(_tr.t('error_generic'));
+                  }
+                } else if (_selectedImage != null) {
+                  await _processImage(_selectedImage!, useLocalOcr: false);
                 }
-              },
-              icon: const Icon(Icons.phone_android_rounded, size: 22),
-              label: Text(
-                _tr.t('home_continue_free_scan'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontSM,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primary,
-                side: const BorderSide(color: AppTheme.primary, width: 1.5),
-                minimumSize: const Size(double.infinity, 56),
-              ),
-            ),
-            const SizedBox(height: 4),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              style: TextButton.styleFrom(
-                minimumSize: const Size(double.infinity, 52),
-              ),
-              child: Text(
-                _tr.t('home_maybe_later'),
-                style: const TextStyle(
-                  fontSize: AppTheme.fontXS,
-                  color: AppTheme.textMedium,
-                ),
-              ),
-            ),
-          ],
-        ],
+              }
+            },
+            onFailed: () {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_tr.t('home_ad_not_ready')),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          );
+        },
+        onContinueOffline: () async {
+          Navigator.pop(ctx);
+          if (_selectedImage != null) {
+            await _processImage(_selectedImage!, useLocalOcr: true);
+          }
+        },
+        onCancel: () => Navigator.pop(ctx),
       ),
     );
   }
@@ -354,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.10),
+                color: AppTheme.primary.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -891,10 +796,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: _isGuest
-                          ? Colors.white.withOpacity(0.20)
+                          ? Colors.white.withValues(alpha: 0.20)
                           : isPremium
                           ? AppTheme.accent
-                          : Colors.white.withOpacity(0.20),
+                          : Colors.white.withValues(alpha: 0.20),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -1379,6 +1284,160 @@ class _HomeScreenState extends State<HomeScreen> {
                     minimumSize: const Size(double.infinity, 72),
                   ),
                 ),
+        ),
+
+        // ── Banner Ad ────────────────────────────────────────────────────────
+        // Only shown for non-premium users; premium benefit = no ads.
+        if (!_premium.isPremium)
+          const Center(child: BannerAdWidget()),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Scan-limit dialog — separated into its own StatefulWidget so it can
+// rebuild when the rewarded-ad readiness state changes.
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ScanLimitDialog extends StatefulWidget {
+  final bool isGuest;
+  final AppTranslations translations;
+  final Future<void> Function() onWatchAd;
+  final Future<void> Function() onContinueOffline;
+  final VoidCallback onCancel;
+
+  const _ScanLimitDialog({
+    required this.isGuest,
+    required this.translations,
+    required this.onWatchAd,
+    required this.onContinueOffline,
+    required this.onCancel,
+  });
+
+  @override
+  State<_ScanLimitDialog> createState() => _ScanLimitDialogState();
+}
+
+class _ScanLimitDialogState extends State<_ScanLimitDialog> {
+  bool _watching = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.translations;
+    final adReady = AdService().isRewardedAdReady;
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.document_scanner_rounded,
+              size: 32,
+              color: AppTheme.accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              tr.t('home_daily_limit_title'),
+              style: const TextStyle(
+                fontSize: AppTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+      content: Text(
+        tr.t('home_daily_limit_free'),
+        style: const TextStyle(
+          fontSize: AppTheme.fontSM,
+          color: AppTheme.textMedium,
+          height: 1.5,
+        ),
+      ),
+      actions: [
+        // ── Watch Ad button (+1 scan) ──────────────────────────────────────
+        ElevatedButton.icon(
+          onPressed: (_watching || !adReady)
+              ? null
+              : () async {
+                  setState(() => _watching = true);
+                  await widget.onWatchAd();
+                  if (mounted) setState(() => _watching = false);
+                },
+          icon: _watching
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.play_circle_rounded, size: 22),
+          label: Text(
+            adReady ? tr.t('home_watch_ad') : tr.t('home_ad_not_ready'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontSM,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: adReady ? AppTheme.accent : AppTheme.cardBorder,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(double.infinity, 56),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // ── Continue with offline scan ─────────────────────────────────────
+        OutlinedButton.icon(
+          onPressed: _watching ? null : () => widget.onContinueOffline(),
+          icon: const Icon(Icons.phone_android_rounded, size: 20),
+          label: Text(
+            tr.t('home_continue_free_scan'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontSM,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primary,
+            side: const BorderSide(color: AppTheme.primary, width: 1.5),
+            minimumSize: const Size(double.infinity, 52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        // ── Cancel ────────────────────────────────────────────────────────
+        TextButton(
+          onPressed: _watching ? null : widget.onCancel,
+          style: TextButton.styleFrom(
+            minimumSize: const Size(double.infinity, 44),
+          ),
+          child: Text(
+            tr.t('cancel'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontXS,
+              color: AppTheme.textMedium,
+            ),
+          ),
         ),
       ],
     );

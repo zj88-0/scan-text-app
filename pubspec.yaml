@@ -89,6 +89,9 @@ dependencies:
   # WebView for feedback page
   webview_flutter: ^4.10.0
 
+  # Google AdMob ads
+  google_mobile_ads: ^5.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

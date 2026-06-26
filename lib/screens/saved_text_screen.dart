@@ -14,6 +14,7 @@ import '../services/local_ocr_service.dart';
 import '../services/mlkit_translation_service.dart';
 import '../services/premium_service.dart';
 import '../services/translation_service.dart';
+import '../services/ad_service.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/saved_text_card.dart';
 import 'result_screen.dart';
@@ -1257,17 +1258,23 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
 
   Widget _buildBottomButtons() {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: ElevatedButton.icon(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(Icons.document_scanner_rounded, size: 30),
-          label: Text(_tr.t('start_scan')),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            minimumSize: const Size(double.infinity, 68),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+            child: ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.document_scanner_rounded, size: 30),
+              label: Text(_tr.t('start_scan')),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                minimumSize: const Size(double.infinity, 68),
+              ),
+            ),
           ),
-        ),
+          if (!_premium.isPremium) const Center(child: BannerAdWidget()),
+        ],
       ),
     );
   }
