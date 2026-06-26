@@ -105,10 +105,22 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
         }
       }
     }
-    voices.sort((a, b) => a['locale']!.compareTo(b['locale']!));
+    voices.sort((a, b) => (a['locale'] ?? '').compareTo(b['locale'] ?? ''));
 
     // Pre-warm translations for all configured languages in parallel.
-    await Future.wait(_configuredLangs.map(_ensurePreview));
+    // A 10-second timeout ensures we never stay stuck on the loading screen
+    // even if a connectivity issue prevents the ML Kit check from returning.
+    await Future.wait(_configuredLangs.map(_ensurePreview))
+        .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            // Fill any missing preview entries with the English base.
+            for (final code in _configuredLangs) {
+              _previewCache.putIfAbsent(code, () => _basePreviewEn);
+            }
+            return [];
+          },
+        );
 
     if (mounted) {
       setState(() {
@@ -119,10 +131,21 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
   }
 
   /// Translate the base English preview sentence into [langCode] and cache it.
+  /// NOTE: Does NOT trigger a model download — if the model isn't already on
+  /// disk, it falls back to the English base sentence immediately. This prevents
+  /// the voice screen loading phase from hanging indefinitely while a large
+  /// model file is fetched (which caused the Tamil "stuck loading" bug).
   Future<void> _ensurePreview(String langCode) async {
     if (_previewCache.containsKey(langCode)) return;
     if (langCode == 'en') {
       _previewCache['en'] = _basePreviewEn;
+      return;
+    }
+    // Only translate when the model is already on disk.
+    // Do NOT call downloadModel here — that can hang indefinitely.
+    final isReady = await _mlkit.isModelDownloaded(langCode);
+    if (!isReady) {
+      _previewCache[langCode] = _basePreviewEn;
       return;
     }
     try {
@@ -143,7 +166,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
   List<Map<String, String>> _voicesForLang(String langCode) {
     final prefixes = _langPrefixes[langCode] ?? [langCode];
     return _allVoices.where((v) {
-      final locale = v['locale']!.toLowerCase();
+      final locale = (v['locale'] ?? '').toLowerCase();
       return prefixes.any((p) => locale.startsWith(p));
     }).toList();
   }
@@ -155,7 +178,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
     final prefixes =
         dialect == 'cantonese' ? cantonesePrefixes : mandarinPrefixes;
     return _allVoices.where((v) {
-      final locale = v['locale']!.toLowerCase();
+      final locale = (v['locale'] ?? '').toLowerCase();
       return prefixes.any((p) => locale.startsWith(p));
     }).toList();
   }
@@ -175,8 +198,8 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
     setState(() => _previewingVoice = voice['name']);
     await _tts.speakWithVoice(
       _previewFor(langCode),
-      voice['name']!,
-      voice['locale']!,
+      voice['name'] ?? '',
+      voice['locale'] ?? '',
     );
     if (mounted) setState(() => _previewingVoice = null);
   }
@@ -184,10 +207,16 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
   Future<void> _select(
       Map<String, String> voice, String langCode, String friendlyName) async {
     await _tts.stop();
-    await _data.setVoiceForLang(langCode, voice['name']!, voice['locale']!);
+    
     if (langCode == 'zh') {
       await _data.setChineseDialect(_viewedDialect);
+      await _data.setVoiceForDialect(
+          _viewedDialect, voice['name'] ?? '', voice['locale'] ?? '');
+    } else {
+      await _data.setVoiceForLang(
+          langCode, voice['name'] ?? '', voice['locale'] ?? '');
     }
+
     if (!mounted) return;
     setState(() {}); // Refresh checkmarks
     ScaffoldMessenger.of(context).showSnackBar(
@@ -297,7 +326,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                   Expanded(
                     child: _selectedLang == 'zh'
                         ? _buildChineseVoiceContent()
-                        : _buildVoiceListForLang(_selectedLang!),
+                        : _buildVoiceListForLang(_selectedLang ?? 'en'),
                   ),
               ],
             ),
@@ -379,18 +408,14 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
 
   Widget _buildVoiceListForLang(String langCode) {
     final voices = _voicesForLang(langCode);
-    final savedVoice = _data.getVoiceNameForLang(langCode);
-
-    final Map<String, int> regionCounts = {};
-    final List<String> friendlyNames = [];
-
-    for (var voice in voices) {
-      String rLabel = _getRegionLabel(voice['locale'] ?? '');
-      int count = (regionCounts[rLabel] ?? 0) + 1;
-      regionCounts[rLabel] = count;
-      friendlyNames.add('$rLabel ${_tr.t('voice_number')} $count');
+    String? savedVoice = _data.getVoiceNameForLang(langCode);
+    
+    // Default to the first voice if none is explicitly saved
+    if (savedVoice == null && voices.isNotEmpty) {
+      savedVoice = voices.first['name'];
     }
 
+    // ── Empty state (checked first, before building any lists) ──────────
     if (voices.isEmpty) {
       return Center(
         child: Padding(
@@ -398,9 +423,29 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.voice_over_off_rounded,
-                  size: 72, color: AppTheme.primary.withOpacity(0.2)),
-              const SizedBox(height: 20),
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.voice_over_off_rounded,
+                  size: 40,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _friendlyLangName(langCode),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
               Text(
                 _tr.t('voice_none'),
                 textAlign: TextAlign.center,
@@ -410,12 +455,39 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                   height: 1.6,
                 ),
               ),
+              if (_tr.currentLang != 'en') ...[
+                const SizedBox(height: 10),
+                const Text(
+                  'No voices found for this language.\n'
+                  'Go to Settings \u2192 Accessibility\n'
+                  '\u2192 Text-to-Speech to install voices.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontXS,
+                    color: AppTheme.textLight,
+                    height: 1.5,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       );
     }
 
+    // ── Build friendly names (only reached when voices is non-empty) ──────
+    final Map<String, int> regionCounts = {};
+    final List<String> friendlyNames = [];
+    for (var voice in voices) {
+      String rLabel = _getRegionLabel(voice['locale'] ?? '');
+      int count = (regionCounts[rLabel] ?? 0) + 1;
+      regionCounts[rLabel] = count;
+      // Safely use the translated string now that the layout is constrained
+      friendlyNames.add('$rLabel ${_tr.t('voice_number')} $count');
+    }
+
+    // ── Voice list ────────────────────────────────────────────────────────
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: voices.length,
@@ -423,25 +495,25 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
           const Divider(height: 1, indent: 20, endIndent: 20),
       itemBuilder: (ctx, i) {
         final voice = voices[i];
-        final name = voice['name']!;
-        final locale = voice['locale']!;
+        final name = voice['name'] ?? 'Unknown';
+        final locale = voice['locale'] ?? '';
         final isSelected = name == savedVoice;
         final isPreviewing = name == _previewingVoice;
 
         return Container(
           color: isSelected
-              ? AppTheme.primary.withOpacity(0.05)
+              ? AppTheme.primary.withValues(alpha: 0.05)
               : Colors.transparent,
           child: ListTile(
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             leading: Container(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: isSelected
                     ? AppTheme.primary
-                    : AppTheme.primary.withOpacity(0.08),
+                    : AppTheme.primary.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -449,7 +521,7 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                     ? Icons.check_rounded
                     : Icons.record_voice_over_rounded,
                 color: isSelected ? Colors.white : AppTheme.primary,
-                size: 22,
+                size: 20,
               ),
             ),
             title: Text(
@@ -460,52 +532,64 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
                 color: AppTheme.textDark,
               ),
             ),
-            subtitle: Text(
-              locale,
-              style: const TextStyle(
-                fontSize: AppTheme.fontXS,
-                color: AppTheme.textLight,
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: Icon(
-                    isPreviewing
-                        ? Icons.stop_circle_rounded
-                        : Icons.volume_up_rounded,
-                    color: isPreviewing ? AppTheme.danger : AppTheme.accent,
-                    size: 30,
-                  ),
-                  tooltip:
-                      isPreviewing ? _tr.t('stop_audio') : _tr.t('play_audio'),
-                  onPressed: () => _preview(voice, langCode),
-                ),
-                const SizedBox(width: 4),
-                TextButton(
-                  onPressed: isSelected
-                      ? null
-                      : () => _select(voice, langCode, friendlyNames[i]),
-                  style: TextButton.styleFrom(
-                    backgroundColor: isSelected
-                        ? AppTheme.success.withOpacity(0.12)
-                        : AppTheme.primary.withOpacity(0.08),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  ),
-                  child: Text(
-                    isSelected ? _tr.t('already_saved') : _tr.t('voice_select'),
-                    style: TextStyle(
+            subtitle: locale.isNotEmpty
+                ? Text(
+                    locale,
+                    style: const TextStyle(
                       fontSize: AppTheme.fontXS,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? AppTheme.success : AppTheme.primary,
+                      color: AppTheme.textLight,
+                    ),
+                  )
+                : null,
+            // Wrap trailing in a fixed-width SizedBox.
+            // ListTile gives trailing an unbounded width, which causes
+            // RenderBox layout failures when the Row has complex children.
+            trailing: SizedBox(
+              width: 140,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      isPreviewing
+                          ? Icons.stop_circle_rounded
+                          : Icons.volume_up_rounded,
+                      color:
+                          isPreviewing ? AppTheme.danger : AppTheme.accent,
+                      size: 28,
+                    ),
+                    onPressed: () => _preview(voice, langCode),
+                  ),
+                  TextButton(
+                    onPressed: isSelected
+                        ? null
+                        : () => _select(voice, langCode, friendlyNames[i]),
+                    style: TextButton.styleFrom(
+                      backgroundColor: isSelected
+                          ? AppTheme.success.withValues(alpha: 0.12)
+                          : AppTheme.primary.withValues(alpha: 0.08),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      // Short English label — safe for all UI languages.
+                      isSelected ? '\u2713 Set' : 'Use',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontXS,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected
+                            ? AppTheme.success
+                            : AppTheme.primary,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -518,9 +602,8 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
   /// Three-segment toggle: Mandarin | Cantonese | Hokkien
   Widget _buildChineseDialectTabs() {
     final tabs = [
-      ('mandarin', 'Mandarin\n普通話'),
-      ('cantonese', 'Cantonese\n廣東話'),
-      // ('hokkien', 'Hokkien\n閩南語'),
+      ('mandarin', '中文'),
+      ('cantonese', '粤语'),
     ];
     return Container(
       color: AppTheme.primary.withOpacity(0.04),
@@ -570,8 +653,13 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
 
     // Mandarin or Cantonese — show matching system voices.
     final voices = _voicesForChineseDialect(_viewedDialect);
-    final savedVoice = _data.getVoiceNameForLang('zh');
-    final savedDialect = _data.getChineseDialect();
+    String? savedVoice = _data.getVoiceNameForDialect(_viewedDialect) ?? _data.getVoiceNameForLang('zh');
+    
+    // Default to the first voice if none is explicitly saved
+    if (savedVoice == null && voices.isNotEmpty) {
+      savedVoice = voices.first['name'];
+    }
+
 
     final Map<String, int> regionCounts = {};
     final List<String> friendlyNames = [];
@@ -589,9 +677,29 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.voice_over_off_rounded,
-                  size: 72, color: AppTheme.primary.withOpacity(0.2)),
-              const SizedBox(height: 20),
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.voice_over_off_rounded,
+                  size: 40,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _viewedDialect == 'cantonese' ? '粤语 (Cantonese)' : '中文 (Mandarin)',
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
               Text(
                 _tr.t('voice_none'),
                 textAlign: TextAlign.center,
@@ -614,9 +722,9 @@ class _VoiceSelectionScreenState extends State<VoiceSelectionScreen> {
           const Divider(height: 1, indent: 20, endIndent: 20),
       itemBuilder: (ctx, i) {
         final voice = voices[i];
-        final name = voice['name']!;
-        final locale = voice['locale']!;
-        final isSelected = name == savedVoice && _viewedDialect == savedDialect;
+        final name = voice['name'] ?? 'Unknown';
+        final locale = voice['locale'] ?? 'Unknown';
+        final isSelected = name == savedVoice;
         final isPreviewing = name == _previewingVoice;
 
         return Container(

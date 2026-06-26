@@ -102,8 +102,8 @@ class TtsService {
         return;
       }
       // Mandarin or Cantonese: use system TTS with saved voice or locale.
-      final preferredName   = data.getVoiceNameForLang('zh');
-      final preferredLocale = data.getVoiceLocaleForLang('zh');
+      final preferredName   = data.getVoiceNameForDialect(dialect) ?? data.getVoiceNameForLang('zh');
+      final preferredLocale = data.getVoiceLocaleForDialect(dialect) ?? data.getVoiceLocaleForLang('zh');
       if (preferredName != null && preferredLocale != null) {
         await _tts.setVoice({'name': preferredName, 'locale': preferredLocale});
       } else {
@@ -159,6 +159,31 @@ class TtsService {
       _completer!.complete();
     }
     _completer = null;
+  }
+
+  Future<bool> interruptCurrent() async {
+    // Only interrupt FlutterTts, because Hokkien is already instant via setVolume.
+    if (_isSpeaking && !HokkienTtsService().isSpeaking) {
+      await _tts.stop();
+      // Wait for the native TTS engine to fully reset before allowing the next speak call.
+      // _tts.stop() also triggers the cancel handler, but this delay prevents rapid back-to-back speak calls.
+      await Future.delayed(const Duration(milliseconds: 300));
+      _isSpeaking = false;
+      if (_completer != null && !_completer!.isCompleted) {
+        _completer!.complete();
+      }
+      _completer = null;
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> setMuted(bool muted) async {
+    // Use 0.01 instead of 0.0. A volume of 0.0 causes Android's native TTS to
+    // optimise away the speech entirely, causing it to instantly skip to the end.
+    // 0.01 forces it to play silently but keeps the exact normal timing.
+    await _tts.setVolume(muted ? 0.01 : 1.0);
+    await HokkienTtsService().setMuted(muted);
   }
 
   Future<void> pause() async {

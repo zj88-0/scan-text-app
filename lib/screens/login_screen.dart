@@ -444,7 +444,8 @@ class _LoginScreenState extends State<LoginScreen> {
         Positioned(
           top: 16,
           right: 16,
-          child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+          child: GlobalLanguageIcon(
+              fastLoad: true, onChanged: () => setState(() {})),
         ),
       ],
     ),

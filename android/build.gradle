@@ -17,6 +17,9 @@ subprojects {
             if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.startsWith('kotlin-stdlib')) {
                 details.useVersion '1.9.22'
             }
+            if (details.requested.group == 'androidx.camera') {
+                details.useVersion '1.5.0'
+            }
         }
     }
 }

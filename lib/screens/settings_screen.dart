@@ -130,68 +130,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  // ── Language model actions ────────────────────────────────────────────────
+  // Language selection is now fixed to the 4 common languages.
+  // We only allow downloading/deleting models.
 
-  Future<void> _toggleActive(String code) async {
-    final isActive = _activeLanguages.contains(code);
 
-    if (isActive) {
-      if (_activeLanguages.length <= 1) {
-        ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(
-            content: Text(_tr.t('settings_need_one_lang')),
-            backgroundColor: AppTheme.danger,
-          ),
-        );
-        return;
-      }
-      final newActive =
-      _activeLanguages.where((c) => c != code).toList();
-      await _mlkit.setConfiguredLanguages(newActive);
-      setState(() => _activeLanguages = newActive);
-    } else {
-      if (_activeLanguages.length >= _maxActive) {
-        _showMaxLanguagesDialog();
-        return;
-      }
-      final newActive = [..._activeLanguages, code];
-      await _mlkit.setConfiguredLanguages(newActive);
-      setState(() => _activeLanguages = newActive);
-    }
-  }
-
-  void _showMaxLanguagesDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        contentPadding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
-        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        title: Text(
-          _tr.t('settings_max_lang'),
-          style: const TextStyle(
-            fontSize: AppTheme.fontMD,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.primary,
-          ),
-        ),
-        content: Text(
-          _tr.t('settings_max_lang_desc'),
-          style: const TextStyle(fontSize: AppTheme.fontSM, height: 1.6),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 56)),
-            child:
-            Text(_tr.t('settings_ok'), style: const TextStyle(fontSize: AppTheme.fontSM)),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _downloadModel(String code) async {
     if (!mounted) return;
@@ -222,16 +164,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _deleteModel(String code) async {
-    if (_configuredLanguages.length <= 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(
-          content: Text(_tr.t('settings_need_one_lang')),
-          backgroundColor: AppTheme.danger,
-        ),
-      );
-      return;
-    }
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -270,63 +202,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _deleting.add(code));
     await _mlkit.deleteModel(code);
-    // Also wipe the cached translated-JSON so a future re-download regenerates
-    // it with the latest translation logic instead of serving the stale file.
     await AppTranslations().clearCache(code);
-
-    final newConfigured =
-    _configuredLanguages.where((c) => c != code).toList();
-    final newActive = _activeLanguages.where((c) => c != code).toList();
-    await _mlkit.setConfiguredLanguages(newActive);
 
     if (mounted) {
       setState(() {
         _deleting.remove(code);
-        _configuredLanguages = newConfigured;
-        _activeLanguages = newActive;
-        _downloadStatus.remove(code);
+        _downloadStatus[code] = false;
       });
     }
   }
 
-  Future<void> _addLanguage(String code) async {
-    if (_configuredLanguages.contains(code)) return;
 
-    if (!mounted) return;
-    final proceed = await _wifiCheck.checkAndConfirm(context);
-    if (!proceed) return;
-
-    final newConfigured = [..._configuredLanguages, code];
-    List<String> newActive = List.from(_activeLanguages);
-    if (newActive.length < _maxActive) {
-      newActive.add(code);
-    }
-
-    await _mlkit.setConfiguredLanguages(newActive);
-    setState(() {
-      _configuredLanguages = newConfigured;
-      _activeLanguages = newActive;
-      _downloadStatus[code] = false;
-    });
-
-    await _downloadModel(code);
-  }
-
-  List<DropdownMenuItem<String>> _buildAddLanguageItems() {
-    final available =
-    OnDeviceTranslationService.allSupportedLanguages.entries
-        .where((e) => !_configuredLanguages.contains(e.key))
-        .toList()
-      ..sort((a, b) => a.value.compareTo(b.value));
-
-    return available
-        .map((e) => DropdownMenuItem(
-      value: e.key,
-      child: Text(e.value,
-          style: const TextStyle(fontSize: AppTheme.fontXS)),
-    ))
-        .toList();
-  }
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -353,6 +239,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _tr.t('voice_settings')),
             const SizedBox(height: 12),
             _buildVoiceSettingsCard(),
+
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+
+            // ── Auto Read Settings ──────────────────────────────────
+            _sectionTitle(
+                Icons.volume_up_rounded, 'Auto Read'),
+            const SizedBox(height: 12),
+            _buildAutoReadCard(),
 
             const SizedBox(height: 32),
             const Divider(),
@@ -410,36 +306,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _activeLanguages.length >= _maxActive
-                      ? AppTheme.accent.withOpacity(0.15)
-                      : AppTheme.success.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${_activeLanguages.length} / $_maxActive ${_tr.t("settings_active")}',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontXS,
-                    fontWeight: FontWeight.bold,
-                    color: _activeLanguages.length >= _maxActive
-                        ? AppTheme.accent
-                        : AppTheme.success,
-                  ),
-                ),
-              ),
-            ),
             const SizedBox(height: 10),
 
             ..._configuredLanguages
                 .map((code) => _buildLanguageCard(code)),
-
-            const SizedBox(height: 12),
-            _buildAddLanguageRow(),
 
             const SizedBox(height: 32),
             const Divider(),
@@ -661,6 +531,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Auto Read Settings ────────────────────────────────────────────────────
+
+  Widget _buildAutoReadCard() {
+    final autoRead = _dataService.getAutoRead();
+    final startMuted = _dataService.getStartMuted();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.cardBorder, width: 1.5),
+      ),
+      child: Column(
+        children: [
+          SwitchListTile(
+            value: autoRead,
+            onChanged: (val) async {
+              await _dataService.setAutoRead(val);
+              setState(() {});
+            },
+            title: Text(_tr.t('settings_auto_read'), style: const TextStyle(fontSize: AppTheme.fontSM, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+            subtitle: Text(_tr.t('settings_auto_read_desc'), style: const TextStyle(fontSize: AppTheme.fontXS, color: AppTheme.textMedium)),
+            activeColor: AppTheme.primary,
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          SwitchListTile(
+            value: startMuted,
+            onChanged: (val) async {
+              await _dataService.setStartMuted(val);
+              setState(() {});
+            },
+            title: Text(_tr.t('settings_start_muted'), style: const TextStyle(fontSize: AppTheme.fontSM, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+            subtitle: Text(_tr.t('settings_start_muted_desc'), style: const TextStyle(fontSize: AppTheme.fontXS, color: AppTheme.textMedium)),
+            activeColor: AppTheme.danger,
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(16))),
           ),
         ],
       ),
@@ -964,7 +876,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isActive          = _activeLanguages.contains(code);
     final atCap             = _activeLanguages.length >= _maxActive;
     final everHad           = _mlkit.wasEverDownloaded(code);
-    final wasDeletedByUser  = everHad && !isDownloaded && !isDownloading;
+    final wasDeletedByUser  = everHad && !isDownloaded && !isDownloading && !isTranslating;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1015,7 +927,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         if (isDefault) _badge(_tr.t('voice_default'), AppTheme.accent),
                         if (isActive)  _badge(_tr.t('settings_active'), AppTheme.success),
-                        if (wasDeletedByUser)
+                        if (isDownloading || isTranslating)
+                          _badge(_tr.t('settings_downloading'), AppTheme.accent)
+                        else if (wasDeletedByUser)
                           _badge(_tr.t('settings_removed'), AppTheme.danger),
                       ],
                     ),
@@ -1061,65 +975,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           else
             Row(
               children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _toggleActive(code),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? AppTheme.primary
-                            : (!atCap
-                            ? AppTheme.primary.withOpacity(0.08)
-                            : AppTheme.textLight.withOpacity(0.08)),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isActive
-                              ? AppTheme.primary
-                              : (!atCap
-                              ? AppTheme.primary.withOpacity(0.5)
-                              : AppTheme.textLight),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            isActive
-                                ? Icons.check_circle_rounded
-                                : Icons.radio_button_unchecked_rounded,
-                            size: 22,
-                            color: isActive
-                                ? Colors.white
-                                : (!atCap
-                                ? AppTheme.primary
-                                : AppTheme.textLight),
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              isActive ? _tr.t('settings_selected') : _tr.t('settings_select'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: AppTheme.fontXS,
-                                fontWeight: FontWeight.bold,
-                                color: isActive
-                                    ? Colors.white
-                                    : (!atCap
-                                    ? AppTheme.primary
-                                    : AppTheme.textLight),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
                 if (!isDownloaded)
                   Expanded(
                     child: GestureDetector(
@@ -1241,46 +1096,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildAddLanguageRow() {
-    final items = _buildAddLanguageItems();
-    if (items.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: AppTheme.primary.withOpacity(0.3),
-            width: 1.5,
-            style: BorderStyle.solid),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.add_circle_outline_rounded,
-              color: AppTheme.primary, size: 26),
-          const SizedBox(width: 12),
-          Expanded(
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: null,
-                hint: Text(
-                  _tr.t('settings_add_lang_hint'),
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontSM,
-                    color: AppTheme.textLight,
-                  ),
-                ),
-                isExpanded: true,
-                items: items,
-                onChanged: (val) {
-                  if (val != null) _addLanguage(val);
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

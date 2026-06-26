@@ -27,7 +27,6 @@ class GroqTranslationService {
   /// Returns the translated string, or the original [text] on any error.
   Future<String> translateSmart(String text, String targetLangCode) async {
     if (text.isEmpty || text == '[No text found]') return text;
-    if (targetLangCode == 'en') return text;
 
     final uri = Uri.parse('$_baseUrl/api/translate/smart');
 

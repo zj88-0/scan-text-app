@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:camera/camera.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../app_theme.dart';
@@ -14,26 +13,24 @@ import '../services/data_service.dart';
 import '../services/local_ocr_service.dart';
 import '../services/mlkit_translation_service.dart';
 import '../services/premium_service.dart';
-import '../services/groq_translation_service.dart';
 import '../services/translation_service.dart';
 import '../widgets/language_selector.dart';
+import '../widgets/saved_text_card.dart';
 import 'result_screen.dart';
-import 'feedback_screen.dart';
 import 'settings_screen.dart';
 import 'upgrade_screen.dart';
-import 'saved_text_screen.dart';
-import '../widgets/language_selection_helper.dart';
+import 'login_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class SavedTextScreen extends StatefulWidget {
   final VoidCallback onLanguageChanged;
 
-  const HomeScreen({super.key, required this.onLanguageChanged});
+  const SavedTextScreen({super.key, required this.onLanguageChanged});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<SavedTextScreen> createState() => _SavedTextScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _SavedTextScreenState extends State<SavedTextScreen> {
   final ImagePicker _picker = ImagePicker();
   final ApiService _apiService = ApiService();
   final DataService _dataService = DataService();
@@ -65,47 +62,15 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Returns true when the user has chosen the local (offline) scan mode.
   bool get _useLocalScan => _dataService.getScanMode() == 'local';
 
-  CameraController? _cameraController;
-  List<CameraDescription>? _cameras;
-  bool _isCameraInitialized = false;
-  double _minZoom = 1.0;
-  double _maxZoom = 1.0;
-  double _currentZoom = 1.0;
-  bool _showZoomSlider = false;
-
   @override
   void initState() {
     super.initState();
     _currentLang = _dataService.getLanguage();
     _loadSavedTexts();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initCamera();
-    });
-  }
-
-  Future<void> _initCamera() async {
-    try {
-      _cameras = await availableCameras();
-      if (_cameras != null && _cameras!.isNotEmpty) {
-        _cameraController = CameraController(
-          _cameras![0],
-          ResolutionPreset.high,
-          enableAudio: false,
-        );
-        await _cameraController!.initialize();
-        _minZoom = await _cameraController!.getMinZoomLevel();
-        _maxZoom = await _cameraController!.getMaxZoomLevel();
-        _currentZoom = _minZoom;
-        if (mounted) setState(() => _isCameraInitialized = true);
-      }
-    } catch (e) {
-      debugPrint('Camera init error: $e');
-    }
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -130,9 +95,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openSearch() {
-    if (_scaffoldKey.currentState?.isEndDrawerOpen == true) {
-      Navigator.pop(context);
-    }
     setState(() {
       _searchActive = true;
       _searchQuery = '';
@@ -240,8 +202,8 @@ class _HomeScreenState extends State<HomeScreen> {
             OutlinedButton.icon(
               onPressed: () async {
                 Navigator.pop(ctx);
-                if (_selectedImage != null) {
-                  await _processImage(_selectedImage!, useLocalOcr: true);
+                if (source != null) {
+                  await _pickImageWithLocalOcr(source);
                 }
               },
               icon: const Icon(Icons.phone_android_rounded, size: 22),
@@ -301,8 +263,8 @@ class _HomeScreenState extends State<HomeScreen> {
             OutlinedButton.icon(
               onPressed: () async {
                 Navigator.pop(ctx);
-                if (_selectedImage != null) {
-                  await _processImage(_selectedImage!, useLocalOcr: true);
+                if (source != null) {
+                  await _pickImageWithLocalOcr(source);
                 }
               },
               icon: const Icon(Icons.phone_android_rounded, size: 22),
@@ -425,31 +387,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Image helpers ─────────────────────────────────────────────────────────
 
-  File? _selectedImage;
-
-  Future<void> _takePictureWithCamera() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
-    try {
-      final image = await _cameraController!.takePicture();
-      setState(() {
-        _selectedImage = File(image.path);
-      });
-    } catch (e) {
-      _showError(_tr.t('error_generic'));
-    }
-  }
-
-  void _retakePicture() {
-    setState(() {
-      _selectedImage = null;
-    });
-  }
-
-  /// Main entry point when the user taps Gallery.
+  /// Main entry point when the user taps Camera or Gallery.
   /// Routes to the local OCR path or the AI path depending on the user's
   /// setting.  If the AI scan quota is exhausted the limit dialog is shown.
-
   Future<void> _pickImage(ImageSource source) async {
+    // If the user has explicitly chosen local scan in Settings, bypass the
+    // AI quota check entirely.
+    if (_useLocalScan) {
+      await _pickImageWithLocalOcr(source);
+      return;
+    }
+
+    // Check internet connection; if offline, auto-fallback to local scan.
+    final netResults = await Connectivity().checkConnectivity();
+    if (netResults.contains(ConnectivityResult.none) || netResults.isEmpty) {
+      await _pickImageWithLocalOcr(source);
+      return;
+    }
+
+    // AI mode: enforce daily limit.
+    if (!_canScan()) {
+      _showScanLimitDialog(source: source);
+      return;
+    }
+
     try {
       final picked = await _picker.pickImage(
         source: source,
@@ -457,36 +418,11 @@ class _HomeScreenState extends State<HomeScreen> {
         maxWidth: 2048,
         maxHeight: 2048,
       );
-      if (picked != null) {
-        setState(() {
-          _selectedImage = File(picked.path);
-        });
-      }
+      if (picked == null) return;
+      await _processImage(File(picked.path), useLocalOcr: false);
     } catch (e) {
       _showError(_tr.t('error_generic'));
     }
-  }
-
-  Future<void> _confirmScan() async {
-    if (_selectedImage == null) return;
-    
-    if (_useLocalScan) {
-      await _processImage(_selectedImage!, useLocalOcr: true);
-      return;
-    }
-
-    final netResults = await Connectivity().checkConnectivity();
-    if (netResults.contains(ConnectivityResult.none) || netResults.isEmpty) {
-      await _processImage(_selectedImage!, useLocalOcr: true);
-      return;
-    }
-
-    if (!_canScan()) {
-      _showScanLimitDialog(source: null);
-      return;
-    }
-    
-    await _processImage(_selectedImage!, useLocalOcr: false);
   }
 
   /// Picks an image and processes it using the offline ML Kit OCR.
@@ -588,27 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() => _loadingStep = _tr.t('home_translating'));
           translations = await _mlkit.translateToAllConfigured(originalText);
         } else {
-          // Fast heuristic to decide if we need Groq translation before showing
-          bool needsTranslation(String text, String targetLang) {
-            if (text.trim().isEmpty) return false;
-            final hasZh = RegExp(r'[\u4e00-\u9fff]').hasMatch(text);
-            final hasTa = RegExp(r'[\u0B80-\u0BFF]').hasMatch(text);
-            if (targetLang == 'zh') return !hasZh;
-            if (targetLang == 'ta') return !hasTa;
-            if (targetLang == 'en') return hasZh || hasTa;
-            // For ms (Malay), if it has Chinese or Tamil it definitely needs translation.
-            // If it's Latin, we just pass it through to avoid slowing down the majority of scans.
-            if (targetLang == 'ms') return hasZh || hasTa;
-            return false;
-          }
-
-          if (needsTranslation(originalText, _currentLang)) {
-            setState(() => _loadingStep = _tr.t('home_translating'));
-            final translated = await GroqTranslationService().translateSmart(originalText, _currentLang);
-            translations[_currentLang] = translated;
-          } else {
-            translations[_currentLang] = originalText;
-          }
+          translations = {'en': originalText};
         }
 
         if (!mounted) return;
@@ -814,42 +730,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        key: _scaffoldKey,
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          title: _searchActive
-              ? _buildSearchField()
-              : Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _tr.t('home_title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    return Scaffold(
+      key: _scaffoldKey,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: _searchActive
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.pop(context),
               ),
-            ],
-          ),
-          actions: _buildAppBarActions(),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(56),
-            child: Container(
-              color: AppTheme.primary,
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              child: LanguageSelector(
-                currentLang: _currentLang,
-                onChanged: _changeLanguage,
+        title: _searchActive
+            ? _buildSearchField()
+            : Text(
+                _tr.t('saved_texts'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
+        actions: _buildAppBarActions(),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Container(
+            color: AppTheme.primary,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            child: LanguageSelector(
+              currentLang: _currentLang,
+              onChanged: _changeLanguage,
             ),
           ),
         ),
-        endDrawer: _buildEndDrawer(),
-        body: _loading ? _buildLoading() : _buildBody(),
-        bottomNavigationBar: null,
       ),
+      body: _loading ? _buildLoading() : _buildBody(),
+      bottomNavigationBar: _loading ? null : _buildBottomButtons(),
     );
   }
 
@@ -875,7 +787,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.translate_rounded, color: Colors.white, size: 36),
+                  const Icon(Icons.translate_rounded,
+                      color: Colors.white, size: 36),
                   const SizedBox(height: 10),
                   Text(
                     _tr.t('app_name'),
@@ -931,19 +844,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 12),
 
-            // ── Saved Texts button ────────────────────────────────────────────
+            // ── Search button ────────────────────────────────────────────
             _drawerButton(
-              icon: Icons.history_rounded,
-              label: _tr.t('saved_texts'),
-              onTap: () async {
+              icon: Icons.search_rounded,
+              label: _tr.t('home_search'),
+              onTap: _savedTexts.isEmpty
+                  ? null
+                  : () {
                 Navigator.pop(context);
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => SavedTextScreen(onLanguageChanged: widget.onLanguageChanged)),
-                );
-                setState(() => _currentLang = _dataService.getLanguage());
-                await _loadSavedTexts();
+                _openSearch();
               },
+              enabled: _savedTexts.isNotEmpty,
             ),
 
             const SizedBox(height: 4),
@@ -985,23 +896,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
                 setState(() => _currentLang = _dataService.getLanguage());
                 await _loadSavedTexts();
-              },
-            ),
-
-            const SizedBox(height: 4),
-
-            // ── Feedback button ──────────────────────────────────────────
-            _drawerButton(
-              icon: Icons.feedback_rounded,
-              label: _tr.t('feedback'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const FeedbackScreen(),
-                  ),
-                );
               },
             ),
 
@@ -1084,9 +978,9 @@ class _HomeScreenState extends State<HomeScreen> {
     bool enabled = true,
   }) {
     final color = highlight ? AppTheme.accent : AppTheme.primary;
-    final bgColor = highlight
-        ? AppTheme.accent.withValues(alpha: 0.08)
-        : Colors.transparent;
+    final bgColor =
+    highlight ? AppTheme.accent.withOpacity(0.08) : Colors.transparent;
+
     return Opacity(
       opacity: enabled ? 1.0 : 0.45,
       child: InkWell(
@@ -1098,7 +992,8 @@ class _HomeScreenState extends State<HomeScreen> {
             color: bgColor,
             borderRadius: BorderRadius.circular(14),
             border: highlight
-                ? Border.all(color: AppTheme.accent.withValues(alpha: 0.4), width: 1.5)
+                ? Border.all(
+                color: AppTheme.accent.withOpacity(0.4), width: 1.5)
                 : null,
           ),
           child: Row(
@@ -1118,7 +1013,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  color: color.withValues(alpha: 0.5), size: 22),
+                  color: color.withOpacity(0.5), size: 22),
             ],
           ),
         ),
@@ -1150,7 +1045,7 @@ class _HomeScreenState extends State<HomeScreen> {
             color: AppTheme.textLight,
             fontSize: AppTheme.fontSM,
           ),
-          prefixIcon: const Icon(
+          prefixIcon: Icon(
             Icons.search_rounded,
             color: AppTheme.primary,
             size: 24,
@@ -1159,7 +1054,7 @@ class _HomeScreenState extends State<HomeScreen> {
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          contentPadding: EdgeInsets.symmetric(vertical: 12),
         ),
         onChanged: (v) => setState(() => _searchQuery = v),
       ),
@@ -1167,16 +1062,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Widget> _buildAppBarActions() {
+    if (_searchActive) {
+      return [
+        if (_searchQuery.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 26),
+            tooltip: _tr.t('home_clear'),
+            onPressed: () {
+              _searchController.clear();
+              setState(() => _searchQuery = '');
+              _searchFocus.requestFocus();
+            },
+          ),
+        IconButton(
+          icon: const Icon(Icons.search_off_rounded, size: 28),
+          tooltip: _tr.t('home_close_search'),
+          onPressed: _closeSearch,
+        ),
+        const SizedBox(width: 4),
+      ];
+    }
+
     return [
-      IconButton(
-        icon: const Icon(Icons.menu_rounded),
-        iconSize: 42,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
-        alignment: Alignment.center,
-        tooltip: 'Menu',
-        onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-      ),
+      if (_savedTexts.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.search_rounded, size: 28),
+          tooltip: _tr.t('home_search'),
+          onPressed: _openSearch,
+        ),
       const SizedBox(width: 4),
     ];
   }
@@ -1208,180 +1121,154 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBody() {
-    final isPremium = _premium.isPremium;
-    final scansUsed = _dataService.getFreeScanCount();
-    final scansLeft = (_freeDailyLimit - scansUsed).clamp(0, _freeDailyLimit);
-    final scanModeLabel = _useLocalScan
-        ? _tr.t('home_scan_mode_local')
-        : _tr.t('home_scan_mode_ai');
-    final limitLabel = isPremium
-        ? _tr.t('settings_unlimited')
-        : '$scansLeft ${_tr.t('home_of')} $_freeDailyLimit ${_tr.t('home_scans_left')}';
-    final isAtLimit = !isPremium && scansLeft == 0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // ── Scan mode banner ──────────────────────────────────────────────
-        Container(
-          width: double.infinity,
-          color: AppTheme.primary.withValues(alpha: 0.07),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Row(
+    if (_savedTexts.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                _useLocalScan
-                    ? Icons.phone_android_rounded
-                    : Icons.auto_awesome_rounded,
-                size: 18,
-                color: AppTheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  '${_tr.t('home_current_scan_mode')} $scanModeLabel  •  $limitLabel',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontXS,
-                    fontWeight: FontWeight.w600,
-                    color: isAtLimit ? AppTheme.danger : AppTheme.primary,
-                  ),
-                  textAlign: TextAlign.center,
+              Icon(Icons.image_search_rounded,
+                  size: 90, color: AppTheme.primary.withOpacity(0.25)),
+              const SizedBox(height: 24),
+              Text(
+                _isGuest
+                    ? _tr.t('home_no_saved_texts_guest')
+                    : _tr.t('no_saved_texts'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  color: AppTheme.textMedium,
+                  height: 1.6,
                 ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
         ),
+      );
+    }
 
-        // ── Camera Preview or Image Preview ───────────────────────────────
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: _selectedImage != null
-                  ? Image.file(
-                      _selectedImage!,
-                      fit: BoxFit.contain,
-                      width: double.infinity,
-                    )
-                  : _isCameraInitialized && _cameraController != null
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CameraPreview(_cameraController!),
-                            Positioned(
-                              bottom: 16,
-                              left: 16,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_showZoomSlider)
-                                    Container(
-                                      height: 150,
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black45,
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: RotatedBox(
-                                        quarterTurns: -1,
-                                        child: Slider(
-                                          value: _currentZoom,
-                                          min: _minZoom,
-                                          max: _maxZoom,
-                                          activeColor: Colors.white,
-                                          inactiveColor: Colors.white30,
-                                          onChanged: (val) {
-                                            setState(() => _currentZoom = val);
-                                            _cameraController!.setZoomLevel(val);
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  InkWell(
-                                    onTap: () => setState(() => _showZoomSlider = !_showZoomSlider),
-                                    child: Container(
-                                      width: 48,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.black45,
-                                        border: Border.all(color: Colors.white, width: 2),
-                                      ),
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        '${_currentZoom.toStringAsFixed(1)}x',
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 16,
-                              right: 16,
-                              child: FloatingActionButton(
-                                heroTag: 'gallery_btn',
-                                backgroundColor: AppTheme.accent,
-                                onPressed: () => _pickImage(ImageSource.gallery),
-                                child: const Icon(Icons.photo_library_rounded, color: Colors.white),
-                              ),
-                            ),
-                          ],
-                        )
-                      : const Center(
-                          child: CircularProgressIndicator(color: AppTheme.primary),
-                        ),
+    final displayed = _filteredTexts;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+          child: _searchActive && _searchQuery.isNotEmpty
+              ? RichText(
+            text: TextSpan(
+              style: const TextStyle(
+                fontSize: AppTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+              children: [
+                TextSpan(
+                  text: displayed.isEmpty
+                      ? '${_tr.t('home_no_results')} '
+                      : '${displayed.length} ${displayed.length == 1 ? _tr.t('home_result') : _tr.t('home_results')} ',
+                ),
+                TextSpan(
+                  text: '"$_searchQuery"',
+                  style: const TextStyle(color: AppTheme.accent),
+                ),
+              ],
+            ),
+          )
+              : Text(
+            _tr.t('saved_texts'),
+            style: const TextStyle(
+              fontSize: AppTheme.fontLG,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.primary,
             ),
           ),
         ),
-
-        // ── Bottom Action Button ──────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: _selectedImage != null
-              ? Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _retakePicture,
-                        icon: const Icon(Icons.refresh_rounded, size: 28),
-                        label: Text(_tr.t('retake_photo') == 'retake_photo' ? 'Retake' : _tr.t('retake_photo')),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.primary,
-                          side: const BorderSide(color: AppTheme.primary, width: 2),
-                          minimumSize: const Size(0, 72),
-                        ),
+        Expanded(
+          child: displayed.isEmpty
+              ? _buildNoResults()
+              : ListView.builder(
+            padding: const EdgeInsets.only(bottom: 16),
+            itemCount: displayed.length,
+            itemBuilder: (ctx, i) {
+              final text = displayed[i];
+              return SavedTextCard(
+                savedText: text,
+                langCode: _currentLang,
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ResultScreen(
+                        savedText: text,
+                        langCode: _currentLang,
+                        isNew: false,
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _confirmScan,
-                        icon: const Icon(Icons.check_circle_rounded, size: 28),
-                        label: Text(_tr.t('confirm')),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.success,
-                          minimumSize: const Size(0, 72),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              : ElevatedButton.icon(
-                  onPressed: _takePictureWithCamera,
-                  icon: const Icon(Icons.camera_alt_rounded, size: 30),
-                  label: Text(_tr.t('take_photo')),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    minimumSize: const Size(double.infinity, 72),
-                  ),
-                ),
+                  );
+                  setState(
+                          () => _currentLang = _dataService.getLanguage());
+                },
+                onDelete: () => _deleteText(text.id),
+                onEditName: () => _editTextName(text),
+              );
+            },
+          ),
         ),
       ],
     );
   }
-}
 
+  Widget _buildNoResults() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.manage_search_rounded,
+                size: 80, color: AppTheme.primary.withOpacity(0.20)),
+            const SizedBox(height: 20),
+            Text(
+              '${_tr.t('home_no_named_entries')}\n"$_searchQuery"',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: AppTheme.fontSM,
+                color: AppTheme.textMedium,
+                height: 1.6,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _tr.t('home_only_entries_with_name'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontXS,
+                color: AppTheme.textLight,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomButtons() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: ElevatedButton.icon(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.document_scanner_rounded, size: 30),
+          label: Text(_tr.t('start_scan')),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            minimumSize: const Size(double.infinity, 68),
+          ),
+        ),
+      ),
+    );
+  }
+}

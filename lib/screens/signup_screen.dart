@@ -133,7 +133,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+            child: GlobalLanguageIcon(
+                fastLoad: true, onChanged: () => setState(() {})),
           ),
         ],
       ),
@@ -737,7 +738,8 @@ class _VerificationScreenState extends State<_VerificationScreen>
         Positioned(
           top: 16,
           right: 16,
-          child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+          child: GlobalLanguageIcon(
+              fastLoad: true, onChanged: () => setState(() {})),
         ),
         ],
         ),

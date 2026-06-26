@@ -120,6 +120,10 @@ class HokkienTtsService {
     _isSpeaking = false;
   }
 
+  Future<void> setMuted(bool muted) async {
+    await _player.setVolume(muted ? 0.0 : 1.0);
+  }
+
   void dispose() {
     _tts?.free();
     _tts = null;

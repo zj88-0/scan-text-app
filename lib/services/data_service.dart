@@ -39,6 +39,9 @@ class DataService {
   static const String _voiceLocalePrefix = 'voice_locale_';
   static const String _chineseDialectKey = 'chinese_dialect';
 
+  static const String _autoReadKey = 'auto_read';
+  static const String _startMutedKey = 'start_muted';
+
   // ── Scan mode preference ──────────────────────────────────────────────────
   // 'ai'    → use the remote AI/server OCR (default)
   // 'local' → use on-device ML Kit OCR (offline)
@@ -163,6 +166,20 @@ class DataService {
     await _p.setString(_languageKey, langCode);
   }
 
+  // ── Auto Read ─────────────────────────────────────────────────────────────
+
+  bool getAutoRead() => _p.getBool(_autoReadKey) ?? true;
+
+  Future<void> setAutoRead(bool autoRead) async {
+    await _p.setBool(_autoReadKey, autoRead);
+  }
+
+  bool getStartMuted() => _p.getBool(_startMutedKey) ?? false;
+
+  Future<void> setStartMuted(bool startMuted) async {
+    await _p.setBool(_startMutedKey, startMuted);
+  }
+
   // ── Scan Mode ─────────────────────────────────────────────────────────────
 
   /// Returns 'ai' (default) or 'local'.
@@ -207,6 +224,20 @@ class DataService {
   Future<void> clearVoiceForLang(String langCode) async {
     await _p.remove('$_voiceNamePrefix$langCode');
     await _p.remove('$_voiceLocalePrefix$langCode');
+  }
+
+  // ── Chinese Dialect Voice Preference ──────────────────────────────────────
+
+  String? getVoiceNameForDialect(String dialect) =>
+      _p.getString('$_voiceNamePrefix${dialect}_zh');
+
+  String? getVoiceLocaleForDialect(String dialect) =>
+      _p.getString('$_voiceLocalePrefix${dialect}_zh');
+
+  Future<void> setVoiceForDialect(
+      String dialect, String name, String locale) async {
+    await _p.setString('$_voiceNamePrefix${dialect}_zh', name);
+    await _p.setString('$_voiceLocalePrefix${dialect}_zh', locale);
   }
 
   // ── Chinese Dialect Preference ────────────────────────────────────────────

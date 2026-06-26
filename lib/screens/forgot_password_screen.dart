@@ -82,7 +82,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: GlobalLanguageIcon(onChanged: () => setState(() {})),
+            child: GlobalLanguageIcon(
+                fastLoad: true, onChanged: () => setState(() {})),
           ),
         ],
       ),

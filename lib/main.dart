@@ -17,6 +17,7 @@ import 'services/wifi_check_service.dart';
 import 'services/auth_service.dart';
 import 'screens/login_screen.dart';
 import 'widgets/global_language_icon.dart';
+import 'widgets/language_selection_helper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -410,7 +411,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
 
   Widget _buildModelSetup() {
     final _tr = AppTranslations();
-    
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
@@ -419,124 +420,129 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
             Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(40),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Image.asset(
-                  'assets/img/VisionAID_logo.png',
-                  width: 220,
-                ),
-                if (_checking)
-                  Text(
-                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.textMedium,
-                      height: 1.5,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Image.asset(
+                      'assets/img/VisionAID_logo.png',
+                      width: 220,
                     ),
-                  ),
-                if (_waitingForWifi)
-                  Text(
-                    _tr.t('setup_checking_conn'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.textMedium,
-                    ),
-                  ),
-                if (_downloading || _done) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    _tr.t('setup_downloading'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.textMedium,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 40),
-                if (_checking || _downloading) ...[
-                  LinearProgressIndicator(
-                    value: _total > 0 ? _current / _total : null,
-                    backgroundColor: AppTheme.cardBorder,
-                    color: AppTheme.accent,
-                    minHeight: 10,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-                if (_done) ...[
-                  const Icon(Icons.check_circle_rounded,
-                      color: AppTheme.success, size: 56),
-                  const SizedBox(height: 16),
-                  Text(
-                    _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontSM,
-                      color: AppTheme.success,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 48),
-                if (_downloading || _done)
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.center,
-                    children: OnDeviceTranslationService.defaultLanguageCodes
-                        .map((code) {
-                      final name = AppTranslations.languageNames[code] ?? _mlkit.displayName(code);
-                      final isDone = _done || _completedModels.contains(code);
-                      return Chip(
-                        avatar: isDone
-                            ? const Icon(Icons.check_circle_rounded,
-                                size: 18, color: AppTheme.success)
-                            : const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: AppTheme.primary),
-                              ),
-                        label: Text(name,
-                            style: TextStyle(
-                                fontSize: AppTheme.fontXS,
+                    if (_checking)
+                      Text(
+                        _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.textMedium,
+                          height: 1.5,
+                        ),
+                      ),
+                    if (_waitingForWifi)
+                      Text(
+                        _tr.t('setup_checking_conn'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.textMedium,
+                        ),
+                      ),
+                    if (_downloading || _done) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _tr.t('setup_downloading'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.textMedium,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 40),
+                    if (_checking || _downloading) ...[
+                      LinearProgressIndicator(
+                        value: _total > 0 ? _current / _total : null,
+                        backgroundColor: AppTheme.cardBorder,
+                        color: AppTheme.accent,
+                        minHeight: 10,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (_done) ...[
+                      const Icon(Icons.check_circle_rounded,
+                          color: AppTheme.success, size: 56),
+                      const SizedBox(height: 16),
+                      Text(
+                        _statusKey.isNotEmpty ? _tr.t(_statusKey) : _statusText,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.success,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 48),
+                    if (_downloading || _done)
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.center,
+                        children: OnDeviceTranslationService
+                            .defaultLanguageCodes
+                            .map((code) {
+                          final name = AppTranslations.languageNames[code] ??
+                              _mlkit.displayName(code);
+                          final isDone =
+                              _done || _completedModels.contains(code);
+                          return Chip(
+                            avatar: isDone
+                                ? const Icon(Icons.check_circle_rounded,
+                                    size: 18, color: AppTheme.success)
+                                : const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppTheme.primary),
+                                  ),
+                            label: Text(name,
+                                style: TextStyle(
+                                    fontSize: AppTheme.fontXS,
+                                    color: isDone
+                                        ? AppTheme.success
+                                        : AppTheme.primary)),
+                            backgroundColor: AppTheme.surface,
+                            side: BorderSide(
                                 color: isDone
                                     ? AppTheme.success
-                                    : AppTheme.primary)),
-                        backgroundColor: AppTheme.surface,
-                        side: BorderSide(
-                            color: isDone
-                                ? AppTheme.success
-                                : AppTheme.cardBorder),
-                      );
-                    }).toList(),
-                  ),
-              ],
+                                    : AppTheme.cardBorder),
+                          );
+                        }).toList(),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          ),
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GlobalLanguageIcon(
+                  fastLoad: true, onChanged: () => setState(() {})),
+            ),
+          ],
         ),
-        Positioned(
-          top: 16,
-          right: 16,
-          child: GlobalLanguageIcon(fastLoad: true, onChanged: () => setState(() {})),
-        ),
-      ],
-    ),
-  ),
-);
+      ),
+    );
   }
 }
 
@@ -609,163 +615,168 @@ class _VerificationWaitingScreenState
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40),
               child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const Icon(
-                  Icons.mark_email_unread_rounded,
-                  color: Colors.white,
-                  size: 56,
-                ),
-              ),
-                const SizedBox(height: 32),
-                Text(
-                  _tr.t('verify_title'),
-                  style: const TextStyle(
-                    fontSize: AppTheme.fontXL,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 12),
-              Text(
-                '${_tr.t('verify_desc_1')}\n$email\n\n${_tr.t('verify_desc_2')}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: AppTheme.fontSM,
-                  color: AppTheme.textMedium,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 36),
-              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppTheme.accent,
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Icon(
+                      Icons.mark_email_unread_rounded,
+                      color: Colors.white,
+                      size: 56,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                    Text(
-                      _tr.t('verify_checking'),
-                      style: const TextStyle(
-                        fontSize: AppTheme.fontSM,
-                        color: AppTheme.textMedium,
-                      ),
+                  const SizedBox(height: 32),
+                  Text(
+                    _tr.t('verify_title'),
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontXL,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primary,
                     ),
-                  ],
-                ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: ElevatedButton.icon(
-                  onPressed: _checking ? null : _handleProceed,
-                  icon: _checking
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2.5),
-                        )
-                      : const Icon(Icons.check_circle_rounded, size: 26),
-                  label: Text(
-                    _checking ? _tr.t('verify_btn_check') : _tr.t('verify_btn_continue'),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '${_tr.t('verify_desc_1')}\n$email\n\n${_tr.t('verify_desc_2')}',
+                    textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: AppTheme.fontSM,
-                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textMedium,
+                      height: 1.6,
                     ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 0,
-                  ),
-                ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 250),
-                child: _notVerifiedYet
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEF3C7),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.info_outline_rounded,
-                                  color: Color(0xFFD97706), size: 22),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _tr.t('verify_err_not_yet'),
-                                  style: const TextStyle(
-                                    color: Color(0xFFD97706),
-                                    fontSize: AppTheme.fontXS,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                  const SizedBox(height: 36),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppTheme.accent,
                         ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: _checking ? null : _handleResend,
-                icon: const Icon(Icons.send_rounded, size: 24),
-                label: Text(_tr.t('verify_resend'),
-                    style: const TextStyle(
-                        fontSize: AppTheme.fontSM,
-                        fontWeight: FontWeight.w600)),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 60),
-                  side: const BorderSide(color: AppTheme.primary, width: 1.5),
-                  foregroundColor: AppTheme.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _tr.t('verify_checking'),
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          color: AppTheme.textMedium,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 64,
+                    child: ElevatedButton.icon(
+                      onPressed: _checking ? null : _handleProceed,
+                      icon: _checking
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5),
+                            )
+                          : const Icon(Icons.check_circle_rounded, size: 26),
+                      label: Text(
+                        _checking
+                            ? _tr.t('verify_btn_check')
+                            : _tr.t('verify_btn_continue'),
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontSM,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 250),
+                    child: _notVerifiedYet
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.info_outline_rounded,
+                                      color: Color(0xFFD97706), size: 22),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _tr.t('verify_err_not_yet'),
+                                      style: const TextStyle(
+                                        color: Color(0xFFD97706),
+                                        fontSize: AppTheme.fontXS,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  const SizedBox(height: 20),
+                  OutlinedButton.icon(
+                    onPressed: _checking ? null : _handleResend,
+                    icon: const Icon(Icons.send_rounded, size: 24),
+                    label: Text(_tr.t('verify_resend'),
+                        style: const TextStyle(
+                            fontSize: AppTheme.fontSM,
+                            fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 60),
+                      side:
+                          const BorderSide(color: AppTheme.primary, width: 1.5),
+                      foregroundColor: AppTheme.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: _checking ? null : widget.onSignOut,
+                    child: Text(
+                      _tr.t('verify_diff_account'),
+                      style: const TextStyle(
+                          color: AppTheme.textMedium,
+                          fontSize: AppTheme.fontXS),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: _checking ? null : widget.onSignOut,
-                child: Text(
-                  _tr.t('verify_diff_account'),
-                  style: const TextStyle(
-                      color: AppTheme.textMedium, fontSize: AppTheme.fontXS),
-                ),
-              ),
-            ],
-          ),
+            ),
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GlobalLanguageIcon(
+                  fastLoad: true, onChanged: () => setState(() {})),
+            ),
+          ],
         ),
-        Positioned(
-          top: 16,
-          right: 16,
-          child: GlobalLanguageIcon(fastLoad: true, onChanged: () => setState(() {})),
-        ),
-      ],
-    ),
-  ),
-);
+      ),
+    );
   }
 }
 
@@ -783,10 +794,12 @@ class _SplashLoading extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: GlobalLanguageIcon(fastLoad: true, onChanged: () {
-              // We do nothing on change since splash only shows logo,
-              // but we need the icon visible
-            }),
+            child: GlobalLanguageIcon(
+                fastLoad: true,
+                onChanged: () {
+                  // We do nothing on change since splash only shows logo,
+                  // but we need the icon visible
+                }),
           ),
         ],
       ),

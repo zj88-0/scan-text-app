@@ -46,7 +46,13 @@ class AppTranslations {
 
         if (await file.exists()) {
           final raw = await file.readAsString();
-          _strings = Map<String, String>.from(jsonDecode(raw));
+          final cachedStrings = Map<String, String>.from(jsonDecode(raw));
+
+          // Merge with English so any newly added keys fallback to English instead of showing raw keys
+          final rawEn = await rootBundle.loadString('assets/translations/en.json');
+          final enStrings = Map<String, String>.from(jsonDecode(rawEn));
+
+          _strings = Map<String, String>.from(enStrings)..addAll(cachedStrings);
           _currentLang = langCode;
           await _dataService.setLanguage(langCode);
         } else {
@@ -88,7 +94,13 @@ class AppTranslations {
       final file = File('${dir.path}/translations/$langCode.json');
       if (await file.exists()) {
         final raw = await file.readAsString();
-        _strings = Map<String, String>.from(jsonDecode(raw));
+        final cachedStrings = Map<String, String>.from(jsonDecode(raw));
+
+        // Merge with English so any newly added keys fallback to English
+        final rawEn = await rootBundle.loadString('assets/translations/en.json');
+        final enStrings = Map<String, String>.from(jsonDecode(rawEn));
+
+        _strings = Map<String, String>.from(enStrings)..addAll(cachedStrings);
         _currentLang = langCode;
         await _dataService.setLanguage(langCode);
         return;

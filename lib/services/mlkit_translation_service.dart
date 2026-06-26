@@ -1,6 +1,5 @@
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'translation_service.dart';
 
 /// Manages on-device translation using Google ML Kit.
 ///
@@ -33,7 +32,6 @@ class OnDeviceTranslationService {
   OnDeviceTranslatorModelManager();
 
   // ── SharedPreferences keys ────────────────────────────────────────────────
-  static const String _configKey = 'translation_languages';
 
   /// Stores codes of every language model successfully downloaded at least once.
   static const String _everDownloadedKey = 'models_ever_downloaded';
@@ -170,24 +168,19 @@ class OnDeviceTranslationService {
 
   // ── In-memory state ───────────────────────────────────────────────────────
 
-  /// Active (selected) languages shown in the language bar. Max 4.
-  List<String> _configuredLanguages = List.from(defaultLanguageCodes);
-
   /// Registry of all codes ever successfully downloaded on this device.
   Set<String> _everDownloaded = {};
 
-  List<String> get configuredLanguages => List.unmodifiable(_configuredLanguages);
+  List<String> get configuredLanguages {
+    final codes = Set<String>.from(defaultLanguageCodes);
+    codes.addAll(_everDownloaded);
+    return codes.toList();
+  }
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-
-    // Load active language list
-    final saved = prefs.getStringList(_configKey);
-    _configuredLanguages = (saved != null && saved.isNotEmpty)
-        ? saved
-        : List.from(defaultLanguageCodes);
 
     // Load ever-downloaded registry
     final everList = prefs.getStringList(_everDownloadedKey) ?? [];
@@ -195,9 +188,7 @@ class OnDeviceTranslationService {
   }
 
   Future<void> setConfiguredLanguages(List<String> codes) async {
-    _configuredLanguages = List.from(codes);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_configKey, codes);
+    // No-op now, we compute it dynamically.
   }
 
   // ── Ever-downloaded registry ──────────────────────────────────────────────
@@ -250,10 +241,17 @@ class OnDeviceTranslationService {
 
   // ── Model management ──────────────────────────────────────────────────────
 
+  final Map<String, bool> _modelCache = {};
+
   /// Checks whether the model binary is currently on disk (live ML Kit query).
+  /// Results are cached in memory to prevent platform channel flooding when
+  /// scrolling long lists of languages.
   Future<bool> isModelDownloaded(String langCode) async {
+    if (_modelCache.containsKey(langCode)) return _modelCache[langCode]!;
     try {
-      return await _modelManager.isModelDownloaded(_bcpCode(langCode));
+      final res = await _modelManager.isModelDownloaded(_bcpCode(langCode));
+      _modelCache[langCode] = res;
+      return res;
     } catch (_) {
       return false;
     }
@@ -267,6 +265,7 @@ class OnDeviceTranslationService {
       await _modelManager.downloadModel(bcp, isWifiRequired: false);
       final ok = await _modelManager.isModelDownloaded(bcp);
       if (ok && !skipRegistry) await _markEverDownloaded(langCode);
+      _modelCache[langCode] = ok;
       return ok;
     } catch (_) {
       return false;
@@ -279,6 +278,7 @@ class OnDeviceTranslationService {
     try {
       await _modelManager.deleteModel(_bcpCode(langCode));
       await _unmarkEverDownloaded(langCode);
+      _modelCache[langCode] = false;
       return true;
     } catch (_) {
       return false;
@@ -330,7 +330,7 @@ class OnDeviceTranslationService {
 
   /// Silently kick off background downloads for configured (non-default) languages.
   void preloadConfiguredModels() {
-    for (final code in _configuredLanguages) {
+    for (final code in configuredLanguages) {
       if (!defaultLanguageCodes.contains(code)) {
         _silentEnsure(code);
       }
@@ -348,13 +348,13 @@ class OnDeviceTranslationService {
   Future<Map<String, String>> translateToAllConfigured(String text) async {
     final results = <String, String>{};
     if (text.isEmpty || text == '[No text found]') {
-      for (final code in _configuredLanguages) {
+      for (final code in configuredLanguages) {
         results[code] = text;
       }
       return results;
     }
 
-    final futures = _configuredLanguages.map((code) async {
+    final futures = configuredLanguages.map((code) async {
       final translated = await _translateOne(text, code);
       return MapEntry(code, translated);
     });
@@ -423,18 +423,17 @@ class OnDeviceTranslationService {
           .where((e) => e.key != 'app_name' && e.value.isNotEmpty)
           .toList();
 
-      // ── First pass: translate in concurrent batches of 30 ────────────────
-      const int batchSize = 30;
-      for (int i = 0; i < entriesToTranslate.length; i += batchSize) {
-        final batch = entriesToTranslate.skip(i).take(batchSize);
-        await Future.wait(batch.map((entry) async {
-          try {
-            final translated = await _robustTranslate(translator, entry.value);
-            resultMap[entry.key] = translated.trim().isNotEmpty ? translated : entry.value;
-          } catch (_) {
-            resultMap[entry.key] = entry.value;
-          }
-        }));
+      // ── First pass: translate sequentially ───────────────────────────────
+      // Processing concurrently on a single MLKit engine instance can cause
+      // silent hangs/deadlocks on some Android devices. Sequential is safer
+      // and still fast for UI strings.
+      for (final entry in entriesToTranslate) {
+        try {
+          final translated = await _robustTranslate(translator, entry.value);
+          resultMap[entry.key] = translated.trim().isNotEmpty ? translated : entry.value;
+        } catch (_) {
+          resultMap[entry.key] = entry.value;
+        }
       }
 
       // ── Second pass: retry any entry still identical to English source ────
@@ -445,17 +444,15 @@ class OnDeviceTranslationService {
           .where((e) => resultMap[e.key] == e.value)
           .toList();
 
-      if (failedEntries.isNotEmpty) {
-        await Future.wait(failedEntries.map((entry) async {
-          try {
-            final retried = await _sentenceFrameTranslate(translator, entry.value);
-            if (retried.trim().isNotEmpty && retried != entry.value) {
-              resultMap[entry.key] = retried;
-            }
-          } catch (_) {
-            // Keep the original fallback already in resultMap
+      for (final entry in failedEntries) {
+        try {
+          final retried = await _sentenceFrameTranslate(translator, entry.value);
+          if (retried.trim().isNotEmpty && retried != entry.value) {
+            resultMap[entry.key] = retried;
           }
-        }));
+        } catch (_) {
+          // Keep the original fallback already in resultMap
+        }
       }
 
       // ── Copy through skipped keys (app_name, empty) ──────────────────────
@@ -553,7 +550,7 @@ class OnDeviceTranslationService {
 
   Future<Map<String, bool>> getDownloadStatus() async {
     final status = <String, bool>{};
-    for (final code in _configuredLanguages) {
+    for (final code in configuredLanguages) {
       status[code] = await isModelDownloaded(code);
     }
     return status;
