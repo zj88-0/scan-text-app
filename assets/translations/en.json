@@ -367,5 +367,21 @@
   "feedback_submit": "Submit Feedback",
   "home_watch_ad": "Watch a Video to Scan",
   "home_ad_not_ready": "Ad not ready yet",
-  "home_ad_reward_granted": "Starting translation..."
+  "home_ad_reward_granted": "Starting translation...",
+  "qr_dialog_title": "QR Code Detected",
+  "qr_dialog_body": "A QR code was detected in the camera view.",
+  "error_no_text": "No text detected in image",
+  "error_server_fallback": "Server unavailable. Falling back to offline scanner...",
+  "qr_open_webpage": "Open Webpage",
+  "qr_summarise_page": "Summarise Page",
+  "qr_summarising": "Summarising page...",
+  "qr_summary_title": "Page Summary",
+  "qr_open_link": "Open Link",
+  "qr_save_summary": "Save Summary",
+  "qr_saved_success": "Summary saved!",
+  "qr_no_saved": "No saved QR scans yet.\nScan a QR code to get started!",
+  "qr_error_summary": "Could not summarise this page. Please try again.",
+  "qr_error_open_link": "Could not open the link.",
+  "saved_tab_texts": "Texts",
+  "saved_tab_qr": "QR"
 }

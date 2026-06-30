@@ -56,6 +56,37 @@ class ApiService {
     }
   }
 
+  /// Fetches an AI summary of [text] extracted from [url] via the backend.
+  Future<String> summariseText(String url, String text) async {
+    final uri = Uri.parse('$_baseUrl/api/summarise-text');
+
+    try {
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'url': url, 'text': text}),
+          )
+          .timeout(const Duration(seconds: 90));
+
+      if (response.statusCode != 200) {
+        throw ApiException('Server error (${response.statusCode})');
+      }
+
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+
+      if (json['success'] != true) {
+        throw ApiException(json['error'] ?? 'Unknown server error');
+      }
+
+      return (json['summary'] as String?) ?? '';
+    } on SocketException catch (e) {
+      throw ApiException('Cannot connect to server: ${e.message}');
+    } catch (e) {
+      throw ApiException('Network error: $e');
+    }
+  }
+
   /// Test connectivity to the server.
   Future<bool> checkHealth() async {
     try {

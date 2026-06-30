@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/saved_text.dart';
+import '../models/qr_saved_text.dart';
 import 'auth_service.dart';
 
 /// DataService handles all local data persistence for the app.
@@ -157,6 +158,62 @@ class DataService {
   Future<void> clearAllTexts() async {
     await _p.remove(_savedTextsKey);
   }
+
+  // ── QR Scan Results ───────────────────────────────────────────────────────
+
+  /// Returns the SharedPreferences key for QR scans scoped to the current user.
+  String get _qrScansKey {
+    final uid = AuthService().currentUser?.uid;
+    if (uid == null || uid.isEmpty) return 'qr_scans_guest_local';
+    if (_isGuest) return 'qr_scans_guest_local';
+    return 'qr_scans_$uid';
+  }
+
+  Future<List<QrSavedText>> getQrScans() async {
+    final raw = _p.getStringList(_qrScansKey) ?? [];
+    final scans = raw.map((s) {
+      try {
+        return QrSavedText.fromJsonString(s);
+      } catch (_) {
+        return null;
+      }
+    }).whereType<QrSavedText>().toList();
+    scans.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return scans;
+  }
+
+  Future<void> saveQrScan(QrSavedText scan) async {
+    final existing = _p.getStringList(_qrScansKey) ?? [];
+    existing.insert(0, scan.toJsonString());
+    await _p.setStringList(_qrScansKey, existing);
+  }
+
+  Future<void> deleteQrScan(String id) async {
+    final existing = _p.getStringList(_qrScansKey) ?? [];
+    final updated = existing.where((s) {
+      try {
+        final t = QrSavedText.fromJsonString(s);
+        return t.id != id;
+      } catch (_) {
+        return true;
+      }
+    }).toList();
+    await _p.setStringList(_qrScansKey, updated);
+  }
+
+  Future<void> updateQrScan(QrSavedText scan) async {
+    final existing = _p.getStringList(_qrScansKey) ?? [];
+    final updated = existing.map((s) {
+      try {
+        final t = QrSavedText.fromJsonString(s);
+        return t.id == scan.id ? scan.toJsonString() : s;
+      } catch (_) {
+        return s;
+      }
+    }).toList();
+    await _p.setStringList(_qrScansKey, updated);
+  }
+
 
   // ── Language ──────────────────────────────────────────────────────────────
 

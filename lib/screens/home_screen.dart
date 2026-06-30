@@ -23,6 +23,13 @@ import 'feedback_screen.dart';
 import 'settings_screen.dart';
 import 'upgrade_screen.dart';
 import 'saved_text_screen.dart';
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
+import 'package:html2md/html2md.dart' as html2md;
+import '../models/qr_saved_text.dart';
+import 'qr_result_screen.dart';
 import '../widgets/language_selection_helper.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -66,6 +73,9 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Returns true when the user has chosen the local (offline) scan mode.
   bool get _useLocalScan => _dataService.getScanMode() == 'local';
 
+  final BarcodeScanner _barcodeScanner = BarcodeScanner();
+  bool _isProcessingQr = false;
+
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized = false;
@@ -94,20 +104,277 @@ class _HomeScreenState extends State<HomeScreen> {
           _cameras![0],
           ResolutionPreset.high,
           enableAudio: false,
+          imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
         );
         await _cameraController!.initialize();
         _minZoom = await _cameraController!.getMinZoomLevel();
         _maxZoom = await _cameraController!.getMaxZoomLevel();
         _currentZoom = _minZoom;
-        if (mounted) setState(() => _isCameraInitialized = true);
+        if (mounted) {
+          setState(() => _isCameraInitialized = true);
+          _cameraController!.startImageStream(_processCameraImage);
+        }
       }
     } catch (e) {
       debugPrint('Camera init error: $e');
     }
   }
 
+  void _processCameraImage(CameraImage image) async {
+    if (_isProcessingQr) return;
+    if (_cameraController == null) return;
+    
+    final inputImage = _inputImageFromCameraImage(image);
+    if (inputImage == null) return;
+    
+    _isProcessingQr = true;
+    try {
+      final barcodes = await _barcodeScanner.processImage(inputImage);
+      if (barcodes.isNotEmpty) {
+        final barcode = barcodes.first;
+        final url = barcode.rawValue;
+        if (url != null && (url.startsWith('http://') || url.startsWith('https://'))) {
+          await _cameraController!.stopImageStream();
+          await _showQrDialog(url);
+          if (mounted && _cameraController != null && _cameraController!.value.isInitialized) {
+            _cameraController!.startImageStream(_processCameraImage);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint(e.toString());
+    } finally {
+      if (mounted) _isProcessingQr = false;
+    }
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    if (_cameraController == null || _cameras == null || _cameras!.isEmpty) return null;
+    final camera = _cameras![0];
+    final sensorOrientation = camera.sensorOrientation;
+    InputImageRotation? rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    if (rotation == null) return null;
+
+    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    if (format == null ||
+        (Platform.isAndroid && format != InputImageFormat.nv21) ||
+        (Platform.isIOS && format != InputImageFormat.bgra8888)) return null;
+
+    if (image.planes.isEmpty) return null;
+
+    return InputImage.fromBytes(
+      bytes: image.planes.first.bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: format,
+        bytesPerRow: image.planes.first.bytesPerRow,
+      ),
+    );
+  }
+
+  Future<void> _showQrDialog(String url) async {
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_scanner_rounded, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _tr.t('qr_dialog_title'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _tr.t('qr_dialog_body'),
+              style: const TextStyle(fontSize: AppTheme.fontSM),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.cardBorder),
+              ),
+              child: Text(
+                url,
+                style: const TextStyle(
+                  fontSize: AppTheme.fontXS,
+                  color: AppTheme.textMedium,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: Text(_tr.t('cancel')),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'open'),
+            child: Text(_tr.t('qr_open_webpage')),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'summarise'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(_tr.t('qr_summarise_page')),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'open') {
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } else if (result == 'summarise') {
+      await _summariseUrl(url);
+    }
+  }
+
+  Future<void> _summariseUrl(String url) async {
+    if (!_canScan()) {
+      _showScanLimitDialog(
+        onAdRewarded: () => _executeSummariseUrl(url),
+      );
+      return;
+    }
+    await _executeSummariseUrl(url);
+  }
+
+  Future<void> _executeSummariseUrl(String url) async {
+    // ── Phase 1 loading dialog — we update the message text via a ValueNotifier
+    final phaseNotifier = ValueNotifier<String>(_tr.t('qr_summarising'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => ValueListenableBuilder<String>(
+        valueListenable: phaseNotifier,
+        builder: (_, msg, __) => Center(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: AppTheme.accent),
+                const SizedBox(height: 16),
+                Text(
+                  msg,
+                  style: const TextStyle(
+                    fontSize: AppTheme.fontSM,
+                    decoration: TextDecoration.none,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // 1. Fetch website HTML
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        throw Exception('Failed to load webpage');
+      }
+
+      // 2. Convert HTML to clean markdown text
+      final markdownText = html2md.convert(response.body);
+      if (markdownText.trim().isEmpty) {
+        throw Exception('No readable text found');
+      }
+
+      // 3. Summarise via backend Groq API (English summary)
+      final summary = await _apiService.summariseText(url, markdownText);
+      if (!mounted) return;
+
+      // 4. Pre-translate into the 4 default languages
+      phaseNotifier.value = _tr.t('home_translating');
+      final translations = await _mlkit.translateToAllConfigured(summary);
+      translations['en'] = summary; // always keep English
+
+      if (!mounted) return;
+
+      // 5. Record the scan against their limit (only for free users)
+      if (_premium.isFree) {
+        await _dataService.incrementFreeScanCount();
+      }
+
+      Navigator.pop(context); // close loading
+
+      final userId = AuthService().currentUser?.uid ?? '';
+
+      final qrScan = QrSavedText(
+        id: const Uuid().v4(),
+        userId: userId,
+        url: url,
+        summary: summary,
+        translations: translations,
+        createdAt: DateTime.now(),
+      );
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => QrResultScreen(
+            qrScan: qrScan,
+            isNew: true,
+            initialLang: _currentLang,
+          ),
+        ),
+      );
+      
+      // Update the UI (like scan limit) after returning from the result screen
+      if (mounted) {
+        await _loadSavedTexts();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_tr.t('qr_error_summary')),
+          backgroundColor: AppTheme.danger,
+        ),
+      );
+    } finally {
+      phaseNotifier.dispose();
+    }
+  }
+
+
   @override
   void dispose() {
+    _barcodeScanner.close();
     _cameraController?.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -162,13 +429,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return _dataService.getFreeScanCount() < _freeDailyLimit;
   }
 
-  /// Shows the limit dialog when the daily AI-scan quota is exhausted.
-  ///
   /// Three actions are always available:
   ///   1. Watch a rewarded video ad → grants +1 scan
   ///   2. Continue with free offline scan
   ///   3. Cancel
-  void _showScanLimitDialog({ImageSource? source}) {
+  void _showScanLimitDialog({ImageSource? source, VoidCallback? onAdRewarded}) {
     showDialog<void>(
       context: context,
       builder: (ctx) => _ScanLimitDialog(
@@ -202,7 +467,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
                 
                 // Automatically proceed with the scan now that they have a free scan
-                if (source != null) {
+                if (onAdRewarded != null) {
+                  onAdRewarded();
+                } else if (source != null) {
                   try {
                     final picked = await _picker.pickImage(
                       source: source,
@@ -475,7 +742,20 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         setState(() => _loadingStep = _tr.t('processing'));
-        originalText = await _apiService.processImage(fileToSend);
+        try {
+          originalText = await _apiService.processImage(fileToSend);
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_tr.t('error_server_fallback')),
+              backgroundColor: AppTheme.accent,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          await _processImage(imageFile, useLocalOcr: true);
+          return;
+        }
 
         // Only increment the AI quota counter for non-local scans.
         if (_premium.isFree) {

@@ -144,7 +144,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
 
     final ad = BannerAd(
       adUnitId: AdService.bannerAdUnitId,
-      size: AdSize.banner,
+      size: AdSize.fullBanner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
@@ -176,7 +176,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
   Widget build(BuildContext context) {
     if (!_isLoaded || _bannerAd == null) return const SizedBox.shrink();
     return SizedBox(
-      width: _bannerAd!.size.width.toDouble(),
+      width: double.infinity,
       height: _bannerAd!.size.height.toDouble(),
       child: AdWidget(ad: _bannerAd!),
     );

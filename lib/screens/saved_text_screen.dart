@@ -21,6 +21,8 @@ import 'result_screen.dart';
 import 'settings_screen.dart';
 import 'upgrade_screen.dart';
 import 'login_screen.dart';
+import 'qr_result_screen.dart';
+import '../models/qr_saved_text.dart';
 
 class SavedTextScreen extends StatefulWidget {
   final VoidCallback onLanguageChanged;
@@ -31,7 +33,7 @@ class SavedTextScreen extends StatefulWidget {
   State<SavedTextScreen> createState() => _SavedTextScreenState();
 }
 
-class _SavedTextScreenState extends State<SavedTextScreen> {
+class _SavedTextScreenState extends State<SavedTextScreen> with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
   final ApiService _apiService = ApiService();
   final DataService _dataService = DataService();
@@ -43,6 +45,8 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<SavedText> _savedTexts = [];
+  List<QrSavedText> _qrTexts = [];
+  late TabController _tabController;
   bool _loading = false;
   String _loadingStep = '';
   String _currentLang = 'en';
@@ -66,12 +70,14 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _currentLang = _dataService.getLanguage();
     _loadSavedTexts();
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -81,7 +87,13 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
     // Guest users have no saved texts persisted (UID is ephemeral),
     // so the list will simply be empty — no change needed.
     final texts = await _dataService.getSavedTexts();
-    if (mounted) setState(() => _savedTexts = texts);
+    final qrTexts = await _dataService.getQrScans();
+    if (mounted) {
+      setState(() {
+        _savedTexts = texts;
+        _qrTexts = qrTexts;
+      });
+    }
   }
 
   // ── Search helpers ────────────────────────────────────────────────────────
@@ -709,6 +721,33 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
     }
   }
 
+  Future<void> _deleteQrScan(String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(_tr.t('delete_confirm'), style: const TextStyle(fontSize: AppTheme.fontMD, fontWeight: FontWeight.bold)),
+        content: Text(_tr.t('delete_message'), style: const TextStyle(fontSize: AppTheme.fontSM)),
+        actionsPadding: const EdgeInsets.all(16),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_tr.t('cancel'), style: const TextStyle(fontSize: AppTheme.fontXS)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: Text(_tr.t('confirm_delete'), style: const TextStyle(fontSize: AppTheme.fontXS)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _dataService.deleteQrScan(id);
+      await _loadSavedTexts();
+    }
+  }
+
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -750,18 +789,42 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
               ),
         actions: _buildAppBarActions(),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
+          preferredSize: const Size.fromHeight(104),
           child: Container(
             color: AppTheme.primary,
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-            child: LanguageSelector(
-              currentLang: _currentLang,
-              onChanged: _changeLanguage,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  child: LanguageSelector(
+                    currentLang: _currentLang,
+                    onChanged: _changeLanguage,
+                  ),
+                ),
+                TabBar(
+                  controller: _tabController,
+                  indicatorColor: AppTheme.accent,
+                  indicatorWeight: 4,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white70,
+                  tabs: [
+                    Tab(text: _tr.t('saved_tab_texts')),
+                    Tab(text: _tr.t('saved_tab_qr')),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
       ),
-      body: _loading ? _buildLoading() : _buildBody(),
+      body: _loading ? _buildLoading() : TabBarView(
+        controller: _tabController,
+        children: [
+          _buildBody(),
+          _buildQrBody(),
+        ],
+      ),
       bottomNavigationBar: _loading ? null : _buildBottomButtons(),
     );
   }
@@ -1253,6 +1316,94 @@ class _SavedTextScreenState extends State<SavedTextScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildQrBody() {
+    if (_qrTexts.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.qr_code_scanner_rounded, size: 90, color: AppTheme.primary.withOpacity(0.25)),
+              const SizedBox(height: 24),
+              Text(
+                _tr.t('qr_no_saved'),
+                style: const TextStyle(
+                  fontSize: AppTheme.fontMD,
+                  color: AppTheme.textMedium,
+                  height: 1.6,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16, top: 16),
+      itemCount: _qrTexts.length,
+      itemBuilder: (ctx, i) {
+        final scan = _qrTexts[i];
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => QrResultScreen(qrScan: scan, isNew: false),
+              ));
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.link_rounded, size: 16, color: AppTheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          scan.urlDomain,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.danger, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _deleteQrScan(scan.id),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    scan.previewText,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontSM,
+                      color: AppTheme.textDark,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

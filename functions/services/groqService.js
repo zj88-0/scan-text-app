@@ -9,7 +9,7 @@ const groq = new Groq({apiKey: process.env.GROQ_API_KEY});
 const GROQ_TIMEOUT_MS = 90000;
 
 /**
- * Sends an image (base64) to Groq Llama 4 Scout and extracts text.
+ * Sends an image (base64) to Groq Llama 3.2 11B Vision and extracts text.
  *
  * @param {string} base64Image - base64-encoded image data (no data URI prefix)
  * @param {string} mimeType    - e.g. 'image/jpeg', 'image/png'
@@ -25,7 +25,7 @@ async function extractTextFromImage(base64Image, mimeType = "image/jpeg") {
   try {
     const response = await groq.chat.completions.create(
         {
-          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          model: "qwen/qwen3.6-27b",
           messages: [
             {
               role: "user",
@@ -43,9 +43,10 @@ to ensure text is extracted in its proper reading order.
 Please IGNORE irrelevant system UI, battery percentages, clocks, times, URLs,
 and navigation menus if it is a screenshot.
 Preserve line breaks and paragraph structure of the actual content.
-Do not add any commentary, explanation, or formatting
-— output strictly the raw extracted text.
-If there is no readable text, respond with: [No text found]`,
+CRITICAL: Do NOT add any conversational filler, do NOT show your thinking
+process, and do NOT describe the image (e.g. do not say "The image shows...").
+Return ONLY the raw transcribed text. If there is no readable text,
+respond exactly with: [No text found]`,
                 },
               ],
             },
@@ -59,10 +60,14 @@ If there is no readable text, respond with: [No text found]`,
 
     // response.choices?.[0] rewritten to avoid optional chaining on brackets
     const choices = response.choices;
-    const content =
+    let content =
       choices && choices[0] && choices[0].message ?
         choices[0].message.content :
         "";
+
+    // Strip out the <think> block that reasoning models (like Qwen) generate
+    content = content.replace(/<think>[\s\S]*?<\/think>\n*/g, "");
+
     return content.trim();
   } catch (err) {
     if (err.name === "AbortError") {

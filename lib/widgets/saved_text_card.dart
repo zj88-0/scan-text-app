@@ -108,7 +108,7 @@ class SavedTextCard extends StatelessWidget {
                 child: Text(
                   displayText.isEmpty ? '—' : displayText,
                   style: const TextStyle(
-                    fontSize: AppTheme.fontMD,
+                    fontSize: AppTheme.fontLG,
                     color: AppTheme.textDark,
                     height: 1.5,
                   ),

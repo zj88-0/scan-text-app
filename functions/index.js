@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const ocrRoutes = require("./routes/ocr");
 const translateRoutes = require("./routes/translate"); // ← NEW
+const summariseTextRoutes = require("./routes/summariseText"); // ← NEW
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.urlencoded({extended: true, limit: "20mb"}));
 
 app.use("/api/ocr", ocrRoutes);
 app.use("/api/translate", translateRoutes); // ← NEW
+app.use("/api/summarise-text", summariseTextRoutes); // ← NEW
 
 app.get("/health", (req, res) => {
   res.json({status: "ok", message: "Elderly Reader Server is running"});

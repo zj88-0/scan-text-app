@@ -9,7 +9,10 @@ build/
 lib/firebase_options.dart
 lib/services/encryption_service.dart
 assets/models/
+functions/firebase-debug.log
 
 # OS generated files
 .DS_Store
 Thumbs.db
+
+*.hprof
